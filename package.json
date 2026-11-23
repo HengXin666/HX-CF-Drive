@@ -1,0 +1,25 @@
+{
+  "name": "hx-cf-drive",
+  "version": "0.1.0",
+  "private": true,
+  "description": "全部运行在 Cloudflare 上的 R2 + Telegram 双后端网盘网关",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:migrate:local": "wrangler d1 migrations apply hx-cf-drive --local",
+    "db:migrate": "wrangler d1 migrations apply hx-cf-drive --remote",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "quota": "node scripts/quota.mjs"
+  },
+  "dependencies": {
+    "hono": "^4.6.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241112.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0",
+    "wrangler": "^3.90.0"
+  }
+}

@@ -1,0 +1,53 @@
+name = "hx-cf-drive"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+# 静态前端 (public/index.html)
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "hx-cf-drive"
+database_id = "REPLACE_WITH_YOUR_D1_ID"
+migrations_dir = "migrations"
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "hx-cf-drive"
+
+# 免费计划只能用 SQLite 后端的 Durable Object
+[[durable_objects.bindings]]
+name = "LIMITER"
+class_name = "ChannelLimiter"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ChannelLimiter"]
+
+# 每 15 分钟: Bot 探活, 清理过期上传会话, 回收站分批清理
+[triggers]
+crons = ["*/15 * * * *"]
+
+[vars]
+# 分片大小 (字节)。TG getFile 上限 20MB, 固定 16MB
+CHUNK_SIZE = "16777216"
+# 单次响应最多拉多少个 TG 分片 (免费计划 50 子请求/次, 留余量)
+MAX_CHUNKS_PER_RESPONSE = "20"
+# 每个频道每分钟最多发多少条 (官方约 20, 压低更安全)
+CHANNEL_RATE_PER_MIN = "15"
+# 路由规则: 视频或大于该字节数的文件走 R2, 其余走 TG
+ROUTE_VIDEO_TO = "r2"
+ROUTE_R2_MIN_BYTES = "209715200"
+# 回收站保留天数
+TRASH_DAYS = "7"
+# 可选: R2 公开桶自定义域名 (例如 https://cdn.example.com), 设置后 R2 文件直链绕过 Worker
+R2_PUBLIC_BASE = ""
+
+# 机密信息用 `wrangler secret put` 设置, 不要写在这里:
+#   ADMIN_TOKEN   管理员令牌
+#   SIGNING_KEY   直链签名密钥
+#   BOT_TOKENS    逗号分隔的 Bot Token (也可以在后台 /api/v1/admin/bots 添加)
