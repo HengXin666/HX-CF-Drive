@@ -43,8 +43,9 @@
   <table><thead><tr><th>名称</th><th>大小</th><th>修改时间</th><th>操作</th></tr></thead><tbody id="list"></tbody></table>
   <div id="log"></div>
 </main>
-<script>
-// 极简前端: 浏览, 上传 (分片 + 断点重试), 下载, 分享, 删除。
+<script type="module">
+// 极简前端: 浏览, 上传 (本地 sha256 秒传 + 分片断点续传), 下载, 分享, 删除。
+import { downloadLarge, uploadFile } from './client.js';
 const $ = (s) => document.querySelector(s);
 let token = localStorage.getItem('hxd_token') || '';
 let cwd = '/';
@@ -77,7 +78,7 @@ async function load(path = cwd) {
 
 function render(items, withPath) {
   $('#list').innerHTML = items.map((n) => `
-    <tr class="${n.kind}" data-id="${n.id}" data-name="${esc(n.name)}" data-path="${esc(n.path || '')}">
+    <tr class="${n.kind}" data-id="${n.id}" data-name="${esc(n.name)}" data-path="${esc(n.path || '')}" data-size="${n.size}">
       <td class="name">${n.kind === 'dir' ? '📁 ' : ''}${esc(withPath ? n.path : n.name)}</td>
       <td>${n.kind === 'dir' ? '-' : fmt(n.size)}</td>
       <td>${new Date(n.updatedAt).toLocaleString()}</td>
@@ -104,29 +105,20 @@ $('#list').onclick = async (e) => {
   try {
     if (!a && tr.classList.contains('dir')) return load(tr.dataset.path || cwd.replace(/\/$/, '') + '/' + name);
     if (a === 'link') { const { url } = await api('POST', '/fs/link', { id }); await navigator.clipboard.writeText(url).catch(() => {}); log('直链已复制: ' + url); }
-    if (a === 'dl') { const { url } = await api('POST', '/fs/link', { id, expiresIn: 3600 }); location.href = url + '&download=1'; }
+    if (a === 'dl') {
+      const { url } = await api('POST', '/fs/link', { id, expiresIn: 3600 });
+      // 超过约 400MB 时服务端一次拼不完, 改为分段拉取写入本地
+      if (Number(tr.dataset.size) > 400 * 1048576) await downloadLarge(url, name, Number(tr.dataset.size), log);
+      else location.href = url + '&download=1';
+    }
     if (a === 'share') { const pw = prompt('分享密码 (可留空)') || undefined; const s = await api('POST', '/shares', { id, password: pw }); log('分享链接: ' + s.url); }
     if (a === 'ren') { const nn = prompt('新名称', name); if (nn && nn !== name) { await api('POST', '/fs/move', { id, name: nn }); load(); } }
     if (a === 'del' && confirm(`删除 ${name}? 可在 7 天内恢复。`)) { await api('POST', '/fs/delete', { id }); load(); }
   } catch (err) { log('操作失败: ' + err.message); }
 };
 
-// 分片上传: 429 按 Retry-After 等待后重试, 其他错误重试 3 次
 async function upload(file) {
-  const init = await api('POST', '/uploads', { path: cwd, name: file.name, size: file.size, mime: file.type || undefined });
-  if (init.done) return log(`秒传完成: ${file.name}`);
-  for (let i = 0; i < init.chunkCount; i++) {
-    const blob = file.slice(i * init.chunkSize, (i + 1) * init.chunkSize);
-    for (let tries = 0; ; tries++) {
-      const r = await fetch(`/api/v1/uploads/${init.uploadId}/${i}`, { method: 'PUT', headers: { Authorization: 'Bearer ' + token }, body: blob });
-      if (r.ok) break;
-      if (r.status === 429 || tries < 3) { await new Promise((s) => setTimeout(s, Number(r.headers.get('Retry-After') || 3) * 1000)); continue; }
-      throw new Error(`分片 ${i} 失败: ${r.status}`);
-    }
-    log(`${file.name}: ${i + 1}/${init.chunkCount} (${init.driver})`);
-  }
-  await api('POST', `/uploads/${init.uploadId}/complete`);
-  log(`上传完成: ${file.name}`);
+  await uploadFile(file, { token, path: cwd, onLog: log });
 }
 
 async function uploadAll(files) {

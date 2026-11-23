@@ -1,13 +1,29 @@
-/** 分片上传: init → putChunk × N → complete。WebDAV PUT 与表单上传也复用这里 */
+/**
+ * 无状态分片上传: init → chunk × N → commit
+ * - init: 校验 + 秒传判断, 返回签名的上传凭证。D1 只读不写
+ * - chunk: 请求体流式转发给 TG, 返回签名的分片回执。D1 零读写
+ * - commit: 验签所有回执, 一次批量写入 blob + node (约 4 行, 含索引)
+ * 上传进度由客户端保存回执来记录, 断点续传只需重传缺的分片。
+ */
 import type { Env, Principal } from '../env';
-import { num } from '../env';
-import { r2Abort, r2Complete, r2CreateMultipart, r2PutPart, r2PutWhole } from '../drivers/r2';
+import { chunkSizeOf } from '../env';
 import {
-  activeChannels, botById, markBot, pickChannel, sendChunk, TgFatal, TgRateLimit, usableBots,
+  activeChannels, coolDown, markDead, pickBot, pickChannel, sendChunkStream, TgFatal, TgRateLimit, usableBots,
 } from '../drivers/tg';
-import { chooseDriver, type Driver } from '../lib/route';
+import { openJson, sealJson } from '../lib/sign';
 import { assertAccess, childByName, getNode, type NodeRow, trashNode } from '../lib/tree';
 import { guessMime, HttpError, newId, now, validName } from '../lib/util';
+
+/** 分片清单中的一项 */
+export interface ChunkRef { c: string; m: number; b: string; f: string; s: number }
+
+/** 上传凭证 (签名后交给客户端)  */
+export interface Ticket {
+  u: string; p: string; n: string; z: number; t: string; h: string | null; o: 0 | 1;
+  id: string; k: number; c: string; x: number;
+}
+
+interface Receipt extends ChunkRef { id: string; i: number }
 
 export interface InitInput {
   parentId: string;
@@ -15,23 +31,28 @@ export interface InitInput {
   size: number;
   mime?: string;
   sha256?: string;
-  backend?: string;
   overwrite?: boolean;
-}
-
-export interface SessionRow {
-  id: string; parent_id: string; name: string; size: number; mime: string | null; sha256: string | null;
-  blob_id: string; driver: Driver; chunk_size: number; chunk_count: number; r2_upload_id: string | null;
-  received: number; overwrite: number; created_by: string | null; expires_at: number;
 }
 
 export type InitResult =
   | { done: true; node: NodeRow }
-  | { done: false; uploadId: string; driver: Driver; chunkSize: number; chunkCount: number };
+  | { done: false; ticket: string; chunkSize: number; chunkCount: number };
+
+const TICKET = 'up';
+const RECEIPT = 'rc';
+
+export function chunkCountOf(size: number, chunkSize: number): number {
+  return Math.max(1, Math.ceil(size / chunkSize));
+}
+
+export function expectedChunkSize(size: number, chunkSize: number, idx: number): number {
+  const n = chunkCountOf(size, chunkSize);
+  return idx < n - 1 ? chunkSize : size - chunkSize * (n - 1);
+}
 
 export async function initUpload(env: Env, p: Principal, inp: InitInput): Promise<InitResult> {
   if (!validName(inp.name)) throw new HttpError(400, 'invalid name');
-  if (!Number.isInteger(inp.size) || inp.size < 0) throw new HttpError(400, 'invalid size');
+  if (!Number.isInteger(inp.size) || inp.size <= 0) throw new HttpError(400, 'invalid size (empty files are not supported)');
   const parent = await getNode(env, inp.parentId);
   if (!parent || parent.kind !== 'dir') throw new HttpError(404, 'parent not found');
   await assertAccess(env, p, parent.id);
@@ -41,228 +62,156 @@ export async function initUpload(env: Env, p: Principal, inp: InitInput): Promis
   const mime = inp.mime || guessMime(inp.name);
   const sha = inp.sha256 && /^[0-9a-f]{64}$/i.test(inp.sha256) ? inp.sha256.toLowerCase(): null;
 
-  // 秒传: 同哈希同大小的 blob 已存在就直接引用
+  // 秒传: 同哈希同大小的 blob 已存在就直接引用 (走唯一索引, 读 1 行)
   if (sha) {
-    const blob = await env.DB.prepare("SELECT id FROM blobs WHERE sha256 = ? AND size = ? AND status = 'ready'")
-      .bind(sha, inp.size)
-      .first<{ id: string }>();
+    const blob = await env.DB.prepare('SELECT id FROM blobs WHERE sha256 = ? AND size = ?').bind(sha, inp.size).first<{ id: string }>();
     if (blob) {
-      const node = await commitNode(env, p, parent.id, inp.name, inp.size, mime, blob.id, existing, true);
+      const node = await linkNode(env, parent.id, inp.name, inp.size, mime, blob.id, existing);
       return { done: true, node };
     }
   }
 
-  const bots = await usableBots(env);
   const channels = await activeChannels(env);
-  const driver = chooseDriver(mime, inp.size, {
-    videoTo: env.ROUTE_VIDEO_TO === 'tg' ? 'tg' : 'r2',
-    r2MinBytes: num(env.ROUTE_R2_MIN_BYTES, 200 * 1024 * 1024),
-    hasBots: bots.length > 0 && channels.length > 0,
-  }, inp.size === 0 ? 'r2' : inp.backend);
-  const chunkSize = num(env.CHUNK_SIZE, 16 * 1024 * 1024);
-  if (driver === 'tg' && chunkSize > 19 * 1024 * 1024) throw new HttpError(500, 'CHUNK_SIZE too large for Telegram getFile (20MB)');
-  const chunkCount = Math.max(1, Math.ceil(inp.size / chunkSize));
+  if (!channels.length || !(await usableBots(env)).length) throw new HttpError(503, 'no usable bot or channel', { 'Retry-After': '60' });
+  const chunkSize = chunkSizeOf(env);
   const blobId = newId(20);
-  const channelId = driver === 'tg' ? pickChannel(channels, blobId): null;
-  const uploadId = driver === 'r2' && chunkCount > 1 ? await r2CreateMultipart(env, blobId, mime): null;
-  const sessionId = newId(24);
-  const t = now();
-
-  await env.DB.batch([
-    env.DB.prepare(
-      `INSERT INTO blobs (id, driver, size, sha256, chunk_size, chunk_count, r2_key, channel_id, ref_count, status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 'uploading', ?)`,
-).bind(blobId, driver, inp.size, sha, chunkSize, chunkCount, driver === 'r2' ? `b/${blobId}` : null, channelId, t),
-    env.DB.prepare(
-      `INSERT INTO upload_sessions (id, parent_id, name, size, mime, sha256, blob_id, driver, chunk_size, chunk_count,
-         r2_upload_id, overwrite, created_by, expires_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-).bind(sessionId, parent.id, inp.name, inp.size, mime, sha, blobId, driver, chunkSize, chunkCount, uploadId,
-      inp.overwrite ? 1 : 0, p.id, t + 24 * 3600_000),
-  ]);
-  return { done: false, uploadId: sessionId, driver, chunkSize, chunkCount };
+  const t: Ticket = {
+    u: p.id, p: parent.id, n: inp.name, z: inp.size, t: mime, h: sha, o: inp.overwrite ? 1 : 0,
+    id: blobId, k: chunkSize, c: pickChannel(channels, blobId), x: Math.floor(now() / 1000) + 24 * 3600,
+  };
+  return { done: false, ticket: await sealJson(env.SIGNING_KEY, TICKET, t), chunkSize, chunkCount: chunkCountOf(inp.size, chunkSize) };
 }
 
-export async function getSession(env: Env, id: string): Promise<SessionRow> {
-  const s = await env.DB.prepare('SELECT * FROM upload_sessions WHERE id = ?').bind(id).first<SessionRow>();
-  if (!s || s.expires_at < now()) throw new HttpError(404, 'upload session not found or expired');
-  return s;
-}
-
-export function expectedChunkSize(s: SessionRow, idx: number): number {
-  if (idx < s.chunk_count - 1) return s.chunk_size;
-  return s.size - s.chunk_size * (s.chunk_count - 1);
-}
-
-export async function receivedIndexes(env: Env, blobId: string): Promise<number[]> {
-  const r = await env.DB.prepare('SELECT idx FROM chunks WHERE blob_id = ? ORDER BY idx').bind(blobId).all<{ idx: number }>();
-  return r.results.map((x) => x.idx);
+export async function openTicket(env: Env, p: Principal, sealed: string): Promise<Ticket> {
+  const t = await openJson<Ticket>(env.SIGNING_KEY, TICKET, sealed);
+  if (!t || t.x < now() / 1000) throw new HttpError(400, 'bad or expired upload ticket');
+  if (t.u !== p.id) throw new HttpError(403, 'ticket belongs to another token');
+  return t;
 }
 
 /**
- * 上传一个分片。幂等: 已收到的分片直接返回。
- * @param maxWaitMs 限速时最多等待多久, 超过抛 429 (带 Retry-After)
+ * 上传一个分片, 只尝试一次: 遇到 TG 限流直接回 429 + Retry-After, 由客户端重试 (下次会换 Bot)。
+ * 不在 Worker 里等待或缓冲, 请求体流式直通 TG。
  */
-export async function putChunk(env: Env, s: SessionRow, idx: number, body: ArrayBuffer, maxWaitMs = 20_000): Promise<void> {
-  if (!Number.isInteger(idx) || idx < 0 || idx >= s.chunk_count) throw new HttpError(400, 'chunk index out of range');
-  const want = expectedChunkSize(s, idx);
-  if (body.byteLength !== want) throw new HttpError(400, `chunk ${idx} must be ${want} bytes, got ${body.byteLength}`);
-  const dup = await env.DB.prepare('SELECT 1 AS x FROM chunks WHERE blob_id = ? AND idx = ?').bind(s.blob_id, idx).first();
-  if (dup) return;
-
-  if (s.driver === 'r2') {
-    if (s.chunk_count === 1) {
-      await r2PutWhole(env, s.blob_id, body, s.mime ?? 'application/octet-stream');
-      await insertChunk(env, s.blob_id, idx, want, 'r2', 1, 'r2', 'whole');
-    } else {
-      const etag = await r2PutPart(env, s.blob_id, s.r2_upload_id!, idx, body);
-      await insertChunk(env, s.blob_id, idx, want, 'r2', idx + 1, 'r2', etag);
-    }
-    return;
-  }
-
-  const blob = await env.DB.prepare('SELECT channel_id FROM blobs WHERE id = ?').bind(s.blob_id).first<{ channel_id: string }>();
-  if (!blob) throw new HttpError(404, 'blob missing');
-  const limiter = env.LIMITER.get(env.LIMITER.idFromName('global'));
-  const rate = num(env.CHANNEL_RATE_PER_MIN, 15);
-
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const bots = await usableBots(env);
-    if (bots.length === 0) throw new HttpError(503, 'no usable bot', { 'Retry-After': '60' });
-    const slot = await limiter.acquire(blob.channel_id, bots.map((b) => b.id), rate, maxWaitMs);
-    if (!slot.ok) {
-      throw new HttpError(429, 'rate limited, retry later', { 'Retry-After': String(Math.ceil(slot.waitMs / 1000)) });
-    }
-    if (slot.waitMs > 0) await new Promise((r) => setTimeout(r, slot.waitMs));
-    const bot = (await botById(env, slot.botId!))!;
-    try {
-      const { messageId, fileId } = await sendChunk(bot, blob.channel_id, body, `${s.blob_id}.${String(idx).padStart(5, '0')}.bin`);
-      await insertChunk(env, s.blob_id, idx, want, blob.channel_id, messageId, bot.id, fileId);
-      await env.DB.prepare('UPDATE channels SET msg_count = msg_count + 1 WHERE id = ?').bind(blob.channel_id).run();
-      return;
-    } catch (e) {
-      if (e instanceof TgRateLimit) {
-        // 严格服从 retry_after, 再多加 20% 余量
-        const ms = Math.ceil(e.retryAfterSec * 1200);
-        await limiter.penalize(bot.id, ms);
-        await markBot(env, bot.id, 'cooldown', now() + ms, e.message);
-        continue;
-      }
-      if (e instanceof TgFatal) {
-        await limiter.penalize(bot.id, 24 * 3600_000);
-        await markBot(env, bot.id, 'dead', 0, e.message);
-        continue;
-      }
-      await limiter.penalize(bot.id, 60_000);
-      throw new HttpError(502, `telegram upload failed: ${(e as Error).message}`);
-    }
-  }
-  throw new HttpError(429, 'all bots rate limited, retry later', { 'Retry-After': '30' });
-}
-
-async function insertChunk(env: Env, blobId: string, idx: number, size: number, channelId: string, messageId: number, botId: string, fileId: string) {
-  await env.DB.prepare(
-    'INSERT OR IGNORE INTO chunks (blob_id, idx, size, channel_id, message_id, bot_id, file_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
-).bind(blobId, idx, size, channelId, messageId, botId, fileId).run();
-}
-
-export async function completeUpload(env: Env, p: Principal, s: SessionRow): Promise<NodeRow> {
-  const got = await receivedIndexes(env, s.blob_id);
-  if (got.length !== s.chunk_count) {
-    const have = new Set(got);
-    const missing = [];
-    for (let i = 0; i < s.chunk_count && missing.length < 50; i++) if (!have.has(i)) missing.push(i);
-    throw new HttpError(400, `missing chunks: ${missing.join(',')}`);
-  }
-  if (s.driver === 'r2' && s.chunk_count > 1) {
-    const parts = await env.DB.prepare('SELECT message_id AS partNumber, file_id AS etag FROM chunks WHERE blob_id = ?')
-      .bind(s.blob_id)
-      .all<{ partNumber: number; etag: string }>();
-    await r2Complete(env, s.blob_id, s.r2_upload_id!, parts.results);
-  }
+export async function putChunk(env: Env, t: Ticket, idx: number, body: ReadableStream<Uint8Array>, len: number): Promise<string> {
+  const count = chunkCountOf(t.z, t.k);
+  if (!Number.isInteger(idx) || idx < 0 || idx >= count) throw new HttpError(400, 'chunk index out of range');
+  const want = expectedChunkSize(t.z, t.k, idx);
+  if (len !== want) throw new HttpError(400, `chunk ${idx} must be ${want} bytes, got ${len}`);
+  const bots = await usableBots(env);
+  if (!bots.length) throw new HttpError(429, 'all bots cooling down', { 'Retry-After': '30' });
+  const bot = pickBot(bots, `${t.id}:${idx}`);
   try {
-    await env.DB.prepare("UPDATE blobs SET status = 'ready' WHERE id = ?").bind(s.blob_id).run();
-  } catch {
-    // 并发上传同一哈希撞了唯一索引: 放弃哈希, 照样可用
-    await env.DB.prepare("UPDATE blobs SET status = 'ready', sha256 = NULL WHERE id = ?").bind(s.blob_id).run();
+    const r = await sendChunkStream(bot, t.c, body, want, `${t.id}.${String(idx).padStart(5, '0')}.bin`);
+    const rc: Receipt = { id: t.id, i: idx, c: t.c, m: r.messageId, b: bot.id, f: r.fileId, s: want };
+    return sealJson(env.SIGNING_KEY, RECEIPT, rc);
+  } catch (e) {
+    if (e instanceof TgRateLimit) {
+      coolDown(bot.id, Math.ceil(e.retryAfterSec * 1200));
+      const others = bots.length > 1 ? 1 : e.retryAfterSec;
+      throw new HttpError(429, 'telegram rate limited', { 'Retry-After': String(others) });
+    }
+    if (e instanceof TgFatal) {
+      await markDead(env, bot.id, e.message);
+      throw new HttpError(503, 'bot revoked, retry', { 'Retry-After': '1' });
+    }
+    coolDown(bot.id, 30_000);
+    throw new HttpError(502, `telegram upload failed: ${(e as Error).message}`);
   }
-  const existing = await childByName(env, s.parent_id, s.name);
-  if (existing && (existing.kind === 'dir' || !s.overwrite)) throw new HttpError(409, 'target exists');
-  const node = await commitNode(env, p, s.parent_id, s.name, s.size, s.mime ?? 'application/octet-stream', s.blob_id, existing, false);
-  await env.DB.prepare('DELETE FROM upload_sessions WHERE id = ?').bind(s.id).run();
-  return node;
 }
 
-async function commitNode(
-  env: Env, p: Principal, parentId: string, name: string, size: number, mime: string, blobId: string,
-  existing: NodeRow | null, dedup: boolean,
-): Promise<NodeRow> {
+/** 验签全部回执, 写入 blob + node。回执不全时返回缺失的分片号 */
+export async function commitUpload(env: Env, t: Ticket, receipts: string[]): Promise<NodeRow> {
+  const count = chunkCountOf(t.z, t.k);
+  const refs: (ChunkRef | undefined)[] = new Array(count);
+  for (const s of receipts) {
+    const r = await openJson<Receipt>(env.SIGNING_KEY, RECEIPT, s);
+    if (!r || r.id !== t.id || r.i < 0 || r.i >= count) throw new HttpError(400, 'bad receipt');
+    refs[r.i] = { c: r.c, m: r.m, b: r.b, f: r.f, s: r.s };
+  }
+  const missing: number[] = [];
+  for (let i = 0; i < count && missing.length < 50; i++) if (!refs[i]) missing.push(i);
+  if (missing.length) throw new HttpError(400, `missing chunks: ${missing.join(',')}`);
+
+  const existing = await childByName(env, t.p, t.n);
+  if (existing && (existing.kind === 'dir' || !t.o)) throw new HttpError(409, 'target exists');
+  if (existing) await trashNode(env, existing.id);
+
+  const manifest = JSON.stringify(refs);
+  const id = newId();
+  const ts = now();
+  const nodeStmt = env.DB.prepare(
+    `INSERT INTO nodes (id, parent_id, name, kind, size, mime, blob_id, created_at, updated_at) VALUES (?, ?, ?, 'file', ?, ?, ?, ?, ?)`,
+).bind(id, t.p, t.n, t.z, t.t, t.id, ts, ts);
+  const blobSql = 'INSERT INTO blobs (id, size, sha256, chunk_size, manifest, ref_count, created_at) VALUES (?, ?, ?, ?, ?, 1, ?)';
+  try {
+    await env.DB.batch([env.DB.prepare(blobSql).bind(t.id, t.z, t.h, t.k, manifest, ts), nodeStmt]);
+  } catch (e) {
+    // 并发上传了同一内容, 撞了哈希唯一索引: 放弃哈希, 照样可用
+    if (!t.h || !/UNIQUE/i.test(String(e))) throw e;
+    await env.DB.batch([env.DB.prepare(blobSql).bind(t.id, t.z, null, t.k, manifest, ts), nodeStmt]);
+  }
+  return { id, parent_id: t.p, name: t.n, kind: 'file', size: t.z, mime: t.t, blob_id: t.id, created_at: ts, updated_at: ts, deleted_at: null };
+}
+
+/** 秒传或复制时: 新建节点并给 blob 加引用 */
+async function linkNode(env: Env, parentId: string, name: string, size: number, mime: string, blobId: string, existing: NodeRow | null): Promise<NodeRow> {
   if (existing) await trashNode(env, existing.id);
   const t = now();
   const id = newId();
   await env.DB.batch([
-    env.DB.prepare(
-      `INSERT INTO nodes (id, parent_id, name, kind, size, mime, blob_id, created_at, updated_at)
-       VALUES (?, ?, ?, 'file', ?, ?, ?, ?, ?)`,
-).bind(id, parentId, name, size, mime, blobId, t, t),
+    env.DB.prepare(`INSERT INTO nodes (id, parent_id, name, kind, size, mime, blob_id, created_at, updated_at) VALUES (?, ?, ?, 'file', ?, ?, ?, ?, ?)`)
+      .bind(id, parentId, name, size, mime, blobId, t, t),
     env.DB.prepare('UPDATE blobs SET ref_count = ref_count + 1 WHERE id = ?').bind(blobId),
-    env.DB.prepare('INSERT INTO audit_log (actor, action, node_id, detail, at) VALUES (?, ?, ?, ?, ?)')
-      .bind(p.id, dedup ? 'upload.dedup' : 'upload', id, name, t),
   ]);
   return { id, parent_id: parentId, name, kind: 'file', size, mime, blob_id: blobId, created_at: t, updated_at: t, deleted_at: null };
 }
 
-export async function abortUpload(env: Env, s: SessionRow): Promise<void> {
-  if (s.driver === 'r2' && s.r2_upload_id) await r2Abort(env, s.blob_id, s.r2_upload_id);
-  // TG 上已经发出去的分片交给定时任务删除
-  await env.DB.batch([
-    env.DB.prepare("UPDATE blobs SET status = 'purging' WHERE id = ? AND ref_count = 0").bind(s.blob_id),
-    env.DB.prepare('DELETE FROM upload_sessions WHERE id = ?').bind(s.id),
-  ]);
-}
-
-/** 把一个流按分片大小切开, 依次上传。用于 WebDAV PUT 和原始 body 上传 */
+/**
+ * 服务端一次性上传 (表单, 原始 body, WebDAV PUT)。
+ * 流按分片大小切成子流依次直通 TG, 只切视图不复制字节。
+ * 限流时无法重放已消费的流, 直接把 429 返回给客户端。
+ */
 export async function uploadStream(env: Env, p: Principal, inp: InitInput, stream: ReadableStream<Uint8Array>): Promise<NodeRow> {
   const init = await initUpload(env, p, inp);
   if (init.done) {
     await stream.cancel().catch(() => {});
     return init.node;
   }
-  const s = await getSession(env, init.uploadId);
-  let idx = 0;
-  try {
-    for await (const piece of chunked(stream, s.chunk_size)) {
-      // 服务端顺序上传, 允许等待更久 (墙钟时间不计 CPU)
-      await putChunk(env, s, idx++, piece, 60_000);
-    }
-    if (inp.size === 0) await putChunk(env, s, 0, new ArrayBuffer(0));
-    return await completeUpload(env, p, s);
-  } catch (e) {
-    await abortUpload(env, s).catch(() => {});
-    throw e;
+  const t = await openTicket(env, p, init.ticket);
+  const receipts: string[] = [];
+  const reader = stream.getReader();
+  const carry = { buf: null as Uint8Array | null };
+  for (let i = 0; i < init.chunkCount; i++) {
+    const len = expectedChunkSize(t.z, t.k, i);
+    receipts.push(await putChunk(env, t, i, takeBytes(reader, carry, len), len));
   }
+  reader.releaseLock();
+  return commitUpload(env, t, receipts);
 }
 
-/** 流切片: 每次产出恰好 size 字节 (最后一块可能更小)  */
-export async function* chunked(stream: ReadableStream<Uint8Array>, size: number): AsyncGenerator<ArrayBuffer> {
-  const reader = stream.getReader();
-  let buf = new Uint8Array(size);
-  let fill = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    let off = 0;
-    while (off < value.length) {
-      const n = Math.min(size - fill, value.length - off);
-      buf.set(value.subarray(off, off + n), fill);
-      fill += n;
-      off += n;
-      if (fill === size) {
-        yield buf.buffer;
-        buf = new Uint8Array(size);
-        fill = 0;
+/** 从 reader 里取恰好 n 字节作为一个子流; 多读的部分留在 carry 里给下一个子流 */
+export function takeBytes(
+  reader: ReadableStreamDefaultReader<Uint8Array>, carry: { buf: Uint8Array | null }, n: number,
+): ReadableStream<Uint8Array> {
+  let left = n;
+  return new ReadableStream<Uint8Array>({
+    async pull(ctl) {
+      if (left <= 0) return ctl.close();
+      let piece = carry.buf;
+      carry.buf = null;
+      if (!piece) {
+        const { done, value } = await reader.read();
+        if (done) return ctl.error(new HttpError(400, 'body shorter than declared size'));
+        piece = value;
       }
-    }
-  }
-  if (fill > 0) yield buf.slice(0, fill).buffer;
+      if (piece.length > left) {
+        carry.buf = piece.subarray(left);
+        piece = piece.subarray(0, left);
+      }
+      left -= piece.length;
+      ctl.enqueue(piece);
+      if (left <= 0) ctl.close();
+    },
+  });
 }

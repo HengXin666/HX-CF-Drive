@@ -1,9 +1,8 @@
 /** REST API v1。所有接口需要 Authorization: Bearer <token> */
 import { Hono, type Context } from 'hono';
-import type { AppEnv, Env, Principal } from '../env';
+import type { AppEnv, Env } from '../env';
 import { num } from '../env';
-import { r2Key } from '../drivers/r2';
-import { activeChannels, allBots, invalidateBotCache, tgCall } from '../drivers/tg';
+import { activeChannels, allBots, invalidateBotCache, invalidateChannelCache, tgCall } from '../drivers/tg';
 import { requireScope } from '../lib/auth';
 import { signLink } from '../lib/sign';
 import {
@@ -12,9 +11,7 @@ import {
 import { HttpError, newId, now, sha256Hex } from '../lib/util';
 import { runMaintenance } from '../services/maintenance';
 import { serveNode } from '../services/serve';
-import {
-  abortUpload, completeUpload, getSession, initUpload, putChunk, receivedIndexes, uploadStream,
-} from '../services/upload';
+import { commitUpload, initUpload, openTicket, putChunk, uploadStream } from '../services/upload';
 
 export const api = new Hono<AppEnv>();
 
@@ -31,18 +28,7 @@ async function locate(c: C, id?: string | null, path?: string | null): Promise<N
   return node;
 }
 
-async function audit(env: Env, p: Principal, action: string, nodeId: string | null, detail = '') {
-  await env.DB.prepare('INSERT INTO audit_log (actor, action, node_id, detail, at) VALUES (?, ?, ?, ?, ?)')
-    .bind(p.id, action, nodeId, detail, now())
-    .run();
-}
-
 export async function fileLink(env: Env, origin: string, node: NodeRow, expiresInSec = 0): Promise<string> {
-  // R2 文件 + 配了公开域名: 直接给 R2 地址, 完全不经过 Worker
-  if (env.R2_PUBLIC_BASE && node.blob_id && expiresInSec === 0) {
-    const b = await env.DB.prepare('SELECT driver FROM blobs WHERE id = ?').bind(node.blob_id).first<{ driver: string }>();
-    if (b?.driver === 'r2') return `${env.R2_PUBLIC_BASE.replace(/\/$/, '')}/${r2Key(node.blob_id)}`;
-  }
   const exp = expiresInSec > 0 ? Math.floor(Date.now() / 1000) + expiresInSec : 0;
   return `${origin}/f/${node.id}/${encodeURIComponent(node.name)}?${await signLink(env.SIGNING_KEY, node.id, exp)}`;
 }
@@ -65,7 +51,6 @@ api.post('/fs/mkdir', requireScope('write'), async (c) => {
   const { path } = await c.req.json<{ path: string }>();
   const p = c.get('principal');
   const node = await mkdirp(c.env, p.rootId, path);
-  await audit(c.env, p, 'mkdir', node.id, path);
   return c.json({ node: publicNode(node) });
 });
 
@@ -75,7 +60,6 @@ api.post('/fs/move', requireScope('write'), async (c) => {
   const target = b.toParentId || b.toPath ? await locate(c, b.toParentId, b.toPath): await getNode(c.env, node.parent_id!);
   if (!target) throw new HttpError(404, 'target not found');
   await moveNode(c.env, node.id, target.id, b.name ?? node.name, !!b.overwrite);
-  await audit(c.env, c.get('principal'), 'move', node.id, `${target.id}/${b.name ?? node.name}`);
   return c.json({ node: publicNode((await getNode(c.env, node.id))!) });
 });
 
@@ -84,7 +68,6 @@ api.post('/fs/copy', requireScope('write'), async (c) => {
   const src = await locate(c, b.id, b.path);
   const dst = await locate(c, b.toParentId, b.toPath);
   const node = await copyTree(c.env, src, dst.id, b.name ?? src.name);
-  await audit(c.env, c.get('principal'), 'copy', node.id, src.id);
   return c.json({ node: publicNode(node) });
 });
 
@@ -111,7 +94,6 @@ api.post('/fs/delete', requireScope('write'), async (c) => {
   const b = await c.req.json<{ id?: string; path?: string }>();
   const node = await locate(c, b.id, b.path);
   const n = await trashNode(c.env, node.id);
-  await audit(c.env, c.get('principal'), 'delete', node.id, node.name);
   return c.json({ trashed: n });
 });
 
@@ -127,11 +109,22 @@ api.get('/fs/trash', requireScope('write'), async (c) => {
 api.post('/fs/restore', requireScope('write'), async (c) => {
   const { id } = await c.req.json<{ id: string }>();
   await restoreNode(c.env, id);
-  await audit(c.env, c.get('principal'), 'restore', id);
   return c.json({ ok: true });
 });
 
+/** 模糊搜索会扫全表 (读行数 ≈ 文件总数), 按令牌限频。计数在 isolate 内存里, 不耗额度 */
+const searchHits = new Map<string, number[]>();
+function searchAllowed(who: string, perMin: number): boolean {
+  const t = now();
+  const list = (searchHits.get(who) ?? []).filter((x) => t - x < 60_000);
+  if (list.length >= perMin) return false;
+  list.push(t);
+  searchHits.set(who, list);
+  return true;
+}
+
 api.get('/fs/search', requireScope('read'), async (c) => {
+  if (!searchAllowed(c.get('principal').id, num(c.env.SEARCH_PER_MIN, 6))) throw new HttpError(429, 'search rate limited', { 'Retry-After': '10' });
   const q = (c.req.query('q') ?? '').trim();
   if (q.length < 1) throw new HttpError(400, 'q required');
   const limit = Math.min(num(c.req.query('limit'), 50), 200);
@@ -165,39 +158,34 @@ api.on(['GET', 'HEAD'], '/files/:id/content', requireScope('read'), async (c) =>
 
 // ---------------- 上传 ----------------
 
+/** 第 1 步: 申请上传。带 sha256 时可能直接秒传完成 */
 api.post('/uploads', requireScope('write'), async (c) => {
-  const b = await c.req.json<{ parentId?: string; path?: string; name: string; size: number; mime?: string; sha256?: string; backend?: string; overwrite?: boolean; mkdirs?: boolean }>();
+  const b = await c.req.json<{ parentId?: string; path?: string; name: string; size: number; mime?: string; sha256?: string; overwrite?: boolean; mkdirs?: boolean }>();
   const p = c.get('principal');
   let parent: NodeRow;
   if (b.parentId) parent = await locate(c, b.parentId);
   else if (b.mkdirs !== false) parent = await mkdirp(c.env, p.rootId, b.path ?? '/');
   else parent = await locate(c, null, b.path ?? '/');
-  const r = await initUpload(c.env, p, { parentId: parent.id, name: b.name, size: b.size, mime: b.mime, sha256: b.sha256, backend: b.backend, overwrite: b.overwrite });
+  const r = await initUpload(c.env, p, { parentId: parent.id, name: b.name, size: b.size, mime: b.mime, sha256: b.sha256, overwrite: b.overwrite });
   if (r.done) return c.json({ done: true, node: publicNode(r.node), url: await fileLink(c.env, new URL(c.req.url).origin, r.node) });
   return c.json(r);
 });
 
-api.get('/uploads/:id', requireScope('write'), async (c) => {
-  const s = await getSession(c.env, c.req.param('id')!);
-  return c.json({ uploadId: s.id, driver: s.driver, chunkSize: s.chunk_size, chunkCount: s.chunk_count, received: await receivedIndexes(c.env, s.blob_id) });
+/** 第 2 步: 上传分片, 请求体是原始字节。?ticket=...&i=序号。返回回执, 客户端自己保存 */
+api.put('/uploads/chunk', requireScope('write'), async (c) => {
+  const t = await openTicket(c.env, c.get('principal'), c.req.query('ticket') ?? '');
+  const len = Number(c.req.header('Content-Length'));
+  if (!Number.isFinite(len) || !c.req.raw.body) throw new HttpError(411, 'Content-Length required');
+  const receipt = await putChunk(c.env, t, Number(c.req.query('i')), c.req.raw.body, len);
+  return c.json({ receipt });
 });
 
-api.put('/uploads/:id/:idx', requireScope('write'), async (c) => {
-  const s = await getSession(c.env, c.req.param('id')!);
-  const body = await c.req.arrayBuffer();
-  await putChunk(c.env, s, Number(c.req.param('idx')), body);
-  return c.json({ ok: true });
-});
-
-api.post('/uploads/:id/complete', requireScope('write'), async (c) => {
-  const s = await getSession(c.env, c.req.param('id')!);
-  const node = await completeUpload(c.env, c.get('principal'), s);
+/** 第 3 步: 提交全部回执 { ticket, receipts: [...] } */
+api.post('/uploads/commit', requireScope('write'), async (c) => {
+  const b = await c.req.json<{ ticket: string; receipts: string[] }>();
+  const t = await openTicket(c.env, c.get('principal'), b.ticket);
+  const node = await commitUpload(c.env, t, b.receipts ?? []);
   return c.json({ node: publicNode(node), url: await fileLink(c.env, new URL(c.req.url).origin, node) });
-});
-
-api.delete('/uploads/:id', requireScope('write'), async (c) => {
-  await abortUpload(c.env, await getSession(c.env, c.req.param('id')!));
-  return c.json({ ok: true });
 });
 
 /**
@@ -211,7 +199,6 @@ api.post('/upload', requireScope('write'), async (c) => {
   const path = c.req.query('path') ?? '/';
   const ct = c.req.header('Content-Type') ?? '';
   const overwrite = c.req.query('overwrite') === '1';
-  const backend = c.req.query('backend');
   const parent = await mkdirp(c.env, p.rootId, path);
   const results = [];
   if (ct.startsWith('multipart/form-data')) {
@@ -220,14 +207,14 @@ api.post('/upload', requireScope('write'), async (c) => {
       if (typeof v === 'string') continue;
       const f = v as File;
       const name = c.req.query('rename') === '1' ? renameRandom(f.name): f.name;
-      const node = await uploadStream(c.env, p, { parentId: parent.id, name, size: f.size, mime: f.type || undefined, overwrite, backend }, f.stream());
+      const node = await uploadStream(c.env, p, { parentId: parent.id, name, size: f.size, mime: f.type || undefined, overwrite }, f.stream());
       results.push({ node: publicNode(node), url: await fileLink(c.env, origin, node) });
     }
   } else {
     const name = c.req.query('name');
     const len = Number(c.req.header('Content-Length'));
     if (!name || !Number.isFinite(len)) throw new HttpError(400, 'raw upload needs ?name= and Content-Length');
-    const node = await uploadStream(c.env, p, { parentId: parent.id, name, size: len, mime: ct || undefined, overwrite, backend }, c.req.raw.body!);
+    const node = await uploadStream(c.env, p, { parentId: parent.id, name, size: len, mime: ct || undefined, overwrite }, c.req.raw.body!);
     results.push({ node: publicNode(node), url: await fileLink(c.env, origin, node) });
   }
   if (results.length === 0) throw new HttpError(400, 'no file');
@@ -255,7 +242,7 @@ api.post('/shares', requireScope('read'), async (c) => {
 
 api.get('/shares', requireScope('read'), async (c) => {
   const r = await c.env.DB.prepare(
-    'SELECT s.id, s.node_id, s.expires_at, s.download_count, s.created_at, n.name, (s.password_hash IS NOT NULL) AS has_password FROM shares s JOIN nodes n ON n.id = s.node_id ORDER BY s.created_at DESC LIMIT 200',
+    'SELECT s.id, s.node_id, s.expires_at, s.created_at, n.name, (s.password_hash IS NOT NULL) AS has_password FROM shares s JOIN nodes n ON n.id = s.node_id ORDER BY s.created_at DESC LIMIT 200',
 ).all();
   return c.json({ items: r.results });
 });
@@ -268,15 +255,13 @@ api.delete('/shares/:id', requireScope('write'), async (c) => {
 // ---------------- 管理 ----------------
 
 api.get('/admin/stats', requireScope('admin'), async (c) => {
-  const [nodes, blobs, chunks, bots, channels] = await c.env.DB.batch([
-    c.env.DB.prepare("SELECT kind, COUNT(*) AS n FROM nodes WHERE deleted_at IS NULL GROUP BY kind"),
-    c.env.DB.prepare("SELECT driver, COUNT(*) AS n, COALESCE(SUM(size),0) AS bytes FROM blobs WHERE status = 'ready' GROUP BY driver"),
-    c.env.DB.prepare('SELECT COUNT(*) AS n FROM chunks'),
-    c.env.DB.prepare('SELECT id, username, status, fail_count, retry_until, last_error FROM bots'),
+  const [nodes, blobs, bots, channels] = await c.env.DB.batch([
+    c.env.DB.prepare('SELECT kind, COUNT(*) AS n FROM nodes WHERE deleted_at IS NULL GROUP BY kind'),
+    c.env.DB.prepare('SELECT COUNT(*) AS n, COALESCE(SUM(size),0) AS bytes FROM blobs'),
+    c.env.DB.prepare('SELECT id, username, status, last_error FROM bots'),
     c.env.DB.prepare('SELECT * FROM channels'),
   ]);
-  const limiter = await c.env.LIMITER.get(c.env.LIMITER.idFromName('global')).snapshot();
-  return c.json({ nodes: nodes.results, blobs: blobs.results, chunks: chunks.results[0], bots: bots.results, channels: channels.results, limiter });
+  return c.json({ nodes: nodes.results, blobs: blobs.results[0], bots: bots.results, channels: channels.results });
 });
 
 api.post('/admin/bots', requireScope('admin'), async (c) => {
@@ -293,14 +278,9 @@ api.post('/admin/bots', requireScope('admin'), async (c) => {
 });
 
 api.delete('/admin/bots/:id', requireScope('admin'), async (c) => {
-  const used = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM chunks WHERE bot_id = ?').bind(c.req.param('id')).first<{ n: number }>();
-  if (used && used.n > 0 && c.req.query('force') !== '1') {
-    // 仍有分片绑在这个 Bot 上: 改为 dead, 读取时会自动换 Bot 重绑
-    await c.env.DB.prepare("UPDATE bots SET status = 'dead' WHERE id = ?").bind(c.req.param('id')).run();
-    invalidateBotCache();
-    return c.json({ ok: true, note: `bot still owns ${used.n} chunks; marked dead instead of deleting. Use ?force=1 to delete.` });
-  }
-  await c.env.DB.prepare('DELETE FROM bots WHERE id = ?').bind(c.req.param('id')).run();
+  // 默认只标记 dead: 它上传的分片读取时会自动换 Bot 重绑。?force=1 才真正删除
+  const sql = c.req.query('force') === '1' ? 'DELETE FROM bots WHERE id = ?' : "UPDATE bots SET status = 'dead' WHERE id = ?";
+  await c.env.DB.prepare(sql).bind(c.req.param('id')).run();
   invalidateBotCache();
   return c.json({ ok: true });
 });
@@ -315,12 +295,14 @@ api.post('/admin/channels', requireScope('admin'), async (c) => {
   const check: Record<string, string> = {};
   for (const b of bots) check[b.username ?? b.id] = await adminStatus(b.token, id, Number(b.id));
   await c.env.DB.prepare('INSERT OR REPLACE INTO channels (id, title, status, created_at) VALUES (?, ?, ?, ?)').bind(id, chat.title ?? '', 'active', now()).run();
+  invalidateChannelCache();
   return c.json({ id, title: chat.title, bots: check });
 });
 
 api.patch('/admin/channels/:id', requireScope('admin'), async (c) => {
   const { status } = await c.req.json<{ status: 'active' | 'readonly' | 'dead' }>();
   await c.env.DB.prepare('UPDATE channels SET status = ? WHERE id = ?').bind(status, c.req.param('id')).run();
+  invalidateChannelCache();
   return c.json({ ok: true });
 });
 
@@ -349,7 +331,7 @@ api.post('/admin/tokens', requireScope('admin'), async (c) => {
 });
 
 api.get('/admin/tokens', requireScope('admin'), async (c) => {
-  const r = await c.env.DB.prepare('SELECT id, name, scopes, root_id, expires_at, created_at, last_used_at FROM tokens ORDER BY created_at DESC').all();
+  const r = await c.env.DB.prepare('SELECT id, name, scopes, root_id, expires_at, created_at FROM tokens ORDER BY created_at DESC').all();
   return c.json({ items: r.results });
 });
 
@@ -360,8 +342,4 @@ api.delete('/admin/tokens/:id', requireScope('admin'), async (c) => {
 
 api.post('/admin/maintenance', requireScope('admin'), async (c) => c.json(await runMaintenance(c.env)));
 
-api.get('/admin/audit', requireScope('admin'), async (c) => {
-  const r = await c.env.DB.prepare('SELECT * FROM audit_log ORDER BY id DESC LIMIT ?').bind(Math.min(num(c.req.query('limit'), 100), 500)).all();
-  return c.json({ items: r.results });
-});
 

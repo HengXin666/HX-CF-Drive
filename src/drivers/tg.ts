@@ -1,7 +1,8 @@
 /**
  * Telegram Bot API 驱动
- * - 上传: sendDocument (≤50MB), 我们固定 16MB 分片
+ * - 上传: sendDocument, 请求体流式拼成 multipart, Worker 不缓冲, 不复制字节
  * - 下载: getFile (≤20MB) 拿 file_path, 再从 /file/bot<token>/<path> 拉取
+ * - file_path 和 Bot 冷却状态都放在 isolate 内存里, 不消耗 KV/D1/Cache API
  * - file_id 只对上传它的 Bot 有效; Bot 失效时用 forwardMessage 让别的 Bot 重新拿 file_id
  */
 import type { Env } from '../env';
@@ -23,21 +24,12 @@ export interface BotRow {
   id: string;
   token: string;
   username: string | null;
-  status: 'active' | 'cooldown' | 'dead';
-  fail_count: number;
-  retry_until: number;
+  status: 'active' | 'dead';
 }
 
 interface TgResp<T> { ok: boolean; result?: T; description?: string; error_code?: number; parameters?: { retry_after?: number } }
 
-export async function tgCall<T>(token: string, method: string, body?: Record<string, unknown> | FormData): Promise<T> {
-  const init: RequestInit = { method: 'POST' };
-  if (body instanceof FormData) init.body = body;
-  else if (body) {
-    init.body = JSON.stringify(body);
-    init.headers = { 'Content-Type': 'application/json' };
-  }
-  const res = await fetch(`${API}/bot${token}/${method}`, init);
+async function parseTg<T>(res: Response, method: string): Promise<T> {
   let data: TgResp<T>;
   try {
     data = (await res.json()) as TgResp<T>;
@@ -51,47 +43,61 @@ export async function tgCall<T>(token: string, method: string, body?: Record<str
   throw new Error(`telegram ${method} ${code} ${data.description}`);
 }
 
+export async function tgCall<T>(token: string, method: string, body?: Record<string, unknown>): Promise<T> {
+  const init: RequestInit = { method: 'POST' };
+  if (body) {
+    init.body = JSON.stringify(body);
+    init.headers = { 'Content-Type': 'application/json' };
+  }
+  return parseTg<T>(await fetch(`${API}/bot${token}/${method}`, init), method);
+}
+
 // ---------- Bot 池 ----------
 
 let botCache: { at: number; bots: BotRow[] } | null = null;
+/** botId -> 冷却到期时间。只在内存里, 不写 D1 */
+const cooldown = new Map<string, number>();
 
 export function invalidateBotCache() { botCache = null; }
 
-/** 所有 Bot (含冷却和失效的, 下载时也需要它们的 token)  */
+/** 所有 Bot (含失效的, 下载时也可能需要)。isolate 内缓存 5 分钟 */
 export async function allBots(env: Env): Promise<BotRow[]> {
-  if (botCache && now() - botCache.at < 60_000) return botCache.bots;
-  const r = await env.DB.prepare('SELECT id, token, username, status, fail_count, retry_until FROM bots').all<BotRow>();
+  if (botCache && now() - botCache.at < 300_000) return botCache.bots;
+  const r = await env.DB.prepare('SELECT id, token, username, status FROM bots').all<BotRow>();
   botCache = { at: now(), bots: r.results };
   return r.results;
 }
 
 export async function usableBots(env: Env): Promise<BotRow[]> {
   const t = now();
-  return (await allBots(env)).filter((b) => b.status === 'active' || (b.status === 'cooldown' && b.retry_until <= t));
+  return (await allBots(env)).filter((b) => b.status === 'active' && (cooldown.get(b.id) ?? 0) <= t);
 }
 
-export async function botById(env: Env, id: string): Promise<BotRow | undefined> {
-  return (await allBots(env)).find((b) => b.id === id);
+export function coolDown(botId: string, ms: number) {
+  cooldown.set(botId, now() + ms);
 }
 
-export async function markBot(env: Env, botId: string, status: 'active' | 'cooldown' | 'dead', retryUntil = 0, err?: string) {
-  await env.DB.prepare(
-    `UPDATE bots SET status = ?, retry_until = ?, last_error = COALESCE(?, last_error),
-       fail_count = CASE WHEN ? = 'active' THEN 0 ELSE fail_count + 1 END WHERE id = ?`,
-)
-    .bind(status, retryUntil, err ?? null, status, botId)
-    .run();
+/** 按 key 稳定地选一个可用 Bot, 把发送均匀打散到多个 Bot */
+export function pickBot(bots: BotRow[], key: string): BotRow {
+  return bots[hash(key) % bots.length];
+}
+
+export async function markDead(env: Env, botId: string, err: string) {
+  await env.DB.prepare("UPDATE bots SET status = 'dead', last_error = ? WHERE id = ?").bind(err.slice(0, 300), botId).run();
   invalidateBotCache();
 }
 
-/** 把 BOT_TOKENS 环境变量里的 Bot 写进 D1 (幂等)  */
+/** 把 BOT_TOKENS 环境变量里的 Bot 写进 D1 (幂等, INSERT OR IGNORE 已存在时不算写行)  */
 export async function seedBotsFromEnv(env: Env): Promise<number> {
   const list = (env.BOT_TOKENS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  if (!list.length) return 0;
+  const known = new Set((await allBots(env)).map((b) => b.id));
   let added = 0;
   for (const token of list) {
     const id = token.split(':')[0];
-    const r = await env.DB.prepare('INSERT OR IGNORE INTO bots (id, token, created_at) VALUES (?, ?, ?)').bind(id, token, now()).run();
-    added += r.meta.changes ?? 0;
+    if (known.has(id)) continue;
+    await env.DB.prepare('INSERT OR IGNORE INTO bots (id, token, created_at) VALUES (?, ?, ?)').bind(id, token, now()).run();
+    added++;
   }
   if (added) invalidateBotCache();
   return added;
@@ -99,43 +105,98 @@ export async function seedBotsFromEnv(env: Env): Promise<number> {
 
 // ---------- 频道 ----------
 
+let chanCache: { at: number; ids: string[] } | null = null;
+
+export function invalidateChannelCache() { chanCache = null; }
+
 export async function activeChannels(env: Env): Promise<string[]> {
+  if (chanCache && now() - chanCache.at < 300_000) return chanCache.ids;
   const r = await env.DB.prepare("SELECT id FROM channels WHERE status = 'active' ORDER BY created_at").all<{ id: string }>();
-  return r.results.map((x) => x.id);
+  chanCache = { at: now(), ids: r.results.map((x) => x.id) };
+  return chanCache.ids;
+}
+
+export function hash(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h;
 }
 
 /** 按 blobId 哈希选频道, 把写入均匀打散 */
 export function pickChannel(channels: string[], blobId: string): string {
-  let h = 0;
-  for (let i = 0; i < blobId.length; i++) h = (h * 31 + blobId.charCodeAt(i)) >>> 0;
-  return channels[h % channels.length];
+  return channels[hash(blobId) % channels.length];
 }
 
-// ---------- 上传 / 下载 ----------
+// ---------- 上传 ----------
 
 interface TgMessage { message_id: number; document?: { file_id: string; file_size?: number } }
 
-export async function sendChunk(bot: BotRow, channelId: string, data: ArrayBuffer | Blob, filename: string) {
-  const form = new FormData();
-  form.append('chat_id', channelId);
-  form.append('disable_notification', 'true');
-  // 用 document 发送, 禁止 Telegram 识别成媒体再压缩
-  form.append('disable_content_type_detection', 'true');
-  form.append('document', data instanceof Blob ? data : new Blob([data], { type: 'application/octet-stream' }), filename);
-  const msg = await tgCall<TgMessage>(bot.token, 'sendDocument', form);
+/** 构造 multipart 的头尾。中间的文件内容由调用方以流的形式接上 */
+export function multipartFrame(boundary: string, fields: Record<string, string>, filename: string) {
+  let head = '';
+  for (const [k, v] of Object.entries(fields)) {
+    head += `--${boundary}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${v}\r\n`;
+  }
+  head += `--${boundary}\r\nContent-Disposition: form-data; name="document"; filename="${filename}"\r\nContent-Type: application/octet-stream\r\n\r\n`;
+  const enc = new TextEncoder();
+  return { head: enc.encode(head), tail: enc.encode(`\r\n--${boundary}--\r\n`) };
+}
+
+/**
+ * 流式发送一个分片。body 必须恰好 size 字节。
+ * workerd 下用 FixedLengthStream: 字节由运行时原生搬运, 并自动带 Content-Length
+ */
+export async function sendChunkStream(bot: BotRow, channelId: string, body: ReadableStream<Uint8Array>, size: number, filename: string) {
+  const boundary = `hxd${crypto.randomUUID().replace(/-/g, '')}`;
+  const { head, tail } = multipartFrame(boundary, {
+    chat_id: channelId,
+    disable_notification: 'true',
+    // 用 document 发送, 禁止 Telegram 识别成媒体再压缩
+    disable_content_type_detection: 'true',
+  }, filename);
+  const total = head.length + size + tail.length;
+  const FLS = (globalThis as { FixedLengthStream?: new (n: number) => TransformStream<Uint8Array, Uint8Array> }).FixedLengthStream;
+  const { readable, writable } = FLS ? new FLS(total) : new TransformStream<Uint8Array, Uint8Array>();
+  const pump = (async () => {
+    const w = writable.getWriter();
+    await w.write(head);
+    w.releaseLock();
+    await body.pipeTo(writable, { preventClose: true });
+    const w2 = writable.getWriter();
+    await w2.write(tail);
+    await w2.close();
+  })();
+  const sending = fetch(`${API}/bot${bot.token}/sendDocument`, {
+    method: 'POST',
+    headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}`, ...(FLS ? {} : { 'Content-Length': String(total) }) },
+    body: readable,
+    // node 测试环境需要 duplex
+    ...({ duplex: 'half' } as object),
+  });
+  const [res] = await Promise.all([sending, pump]);
+  const msg = await parseTg<TgMessage>(res, 'sendDocument');
   if (!msg.document?.file_id) throw new Error('telegram returned no document');
   return { messageId: msg.message_id, fileId: msg.document.file_id };
 }
 
-/** getFile 结果缓存 50 分钟 (file_path 至少有效 1 小时)。用 Cache API, 不消耗 KV 额度 */
+// ---------- 下载 ----------
+
+/** file_path 内存缓存 (官方保证至少 1 小时有效, 这里用 50 分钟)  */
+const pathCache = new Map<string, { path: string; at: number }>();
+const PATH_TTL = 50 * 60_000;
+
+export function cachedPath(botId: string, fileId: string): string | null {
+  const hit = pathCache.get(`${botId}:${fileId}`);
+  return hit && now() - hit.at < PATH_TTL ? hit.path : null;
+}
+
 export async function filePath(bot: BotRow, fileId: string): Promise<string> {
-  const cache = caches.default;
-  const key = new Request(`https://tg-path.internal/${bot.id}/${encodeURIComponent(fileId)}`);
-  const hit = await cache.match(key);
-  if (hit) return hit.text();
+  const hit = cachedPath(bot.id, fileId);
+  if (hit) return hit;
   const f = await tgCall<{ file_path?: string }>(bot.token, 'getFile', { file_id: fileId });
   if (!f.file_path) throw new Error('telegram getFile returned no path');
-  await cache.put(key, new Response(f.file_path, { headers: { 'Cache-Control': 'max-age=3000' } }));
+  if (pathCache.size > 20_000) pathCache.clear();
+  pathCache.set(`${bot.id}:${fileId}`, { path: f.file_path, at: now() });
   return f.file_path;
 }
 
@@ -144,13 +205,14 @@ export async function fetchChunkRange(bot: BotRow, fileId: string, from: number,
   const path = await filePath(bot, fileId);
   const whole = from === 0 && to === fullSize - 1;
   const res = await fetch(`${API}/file/bot${bot.token}/${path}`, whole ? {} : { headers: { Range: `bytes=${from}-${to}` } });
+  if (res.status === 401 || res.status === 403) throw new TgFatal(`file fetch ${res.status}`);
   if (!res.ok || !res.body) throw new HttpError(502, `telegram file fetch ${res.status}`);
   if (whole || res.status === 206) return res.body;
   // 服务端不支持 Range 时手动裁剪
   return res.body.pipeThrough(sliceStream(from, to - from + 1));
 }
 
-/** 跳过 skip 字节, 只输出 take 字节 */
+/** 跳过 skip 字节, 只输出 take 字节。只切视图, 不复制 */
 export function sliceStream(skip: number, take: number): TransformStream<Uint8Array, Uint8Array> {
   let pos = 0;
   const end = skip + take;

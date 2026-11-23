@@ -17,20 +17,26 @@ const j = async (method, path, body, headers = {}) => {
 const rand = (n) => crypto.randomBytes(n);
 const sha = (b) => crypto.createHash('sha256').update(b).digest('hex');
 
+// 无状态分片上传: init → chunk (拿回执) → commit
 async function chunkUpload(path, name, buf, mime, extra = {}) {
   const init = await j('POST', '/api/v1/uploads', { path, name, size: buf.length, mime, sha256: sha(buf), ...extra });
+  if (init.status !== 200) throw new Error(`init ${init.status} ${JSON.stringify(init.body)}`);
   if (init.body.done) return init.body;
-  const { uploadId, chunkSize, chunkCount, driver } = init.body;
+  const { ticket, chunkSize, chunkCount } = init.body;
+  const receipts = [];
   for (let i = 0; i < chunkCount; i++) {
     for (;;) {
-      const r = await fetch(`${BASE}/api/v1/uploads/${uploadId}/${i}`, { method: 'PUT', headers: H, body: buf.subarray(i * chunkSize, (i + 1) * chunkSize) });
+      const r = await fetch(`${BASE}/api/v1/uploads/chunk?i=${i}&ticket=${encodeURIComponent(ticket)}`, { method: 'PUT', headers: H, body: buf.subarray(i * chunkSize, (i + 1) * chunkSize) });
       if (r.status === 429) { await new Promise((s) => setTimeout(s, Number(r.headers.get('Retry-After') ?? 2) * 1000)); continue; }
       if (!r.ok) throw new Error(`chunk ${i}: ${r.status} ${await r.text()}`);
+      receipts.push((await r.json()).receipt);
       break;
     }
   }
-  const done = await j('POST', `/api/v1/uploads/${uploadId}/complete`);
-  return { ...done.body, driver };
+  const bad = await j('POST', '/api/v1/uploads/commit', { ticket, receipts: receipts.slice(1) });
+  if (chunkCount > 1 && bad.status !== 400) throw new Error('缺分片时 commit 应该失败');
+  const done = await j('POST', '/api/v1/uploads/commit', { ticket, receipts });
+  return { ...done.body, chunkCount };
 }
 
 const health = await j('GET', '/api/health');
@@ -51,14 +57,14 @@ const got = Buffer.from(await (await fetch(up.url)).arrayBuffer());
 ok(got.equals(img), '签名直链内容一致');
 ok((await fetch(up.url.replace(/s=[^&]+/, 's=bad'))).status === 403, '篡改签名 403');
 
-// 40MB 普通文件: 强制 TG, 3 个分片 + Range
+// 40MB 普通文件: 19MiB 分片, 3 片 + Range
 const big = rand(40 * 1024 * 1024);
-const r1 = await chunkUpload(`${P}/files`, 'big.bin', big, 'application/octet-stream', { backend: 'tg' });
-ok(r1.driver === 'tg' && r1.node.size === big.length, 'TG 分片上传 40MB');
+const r1 = await chunkUpload(`${P}/files`, 'big.bin', big, 'application/octet-stream');
+ok(r1.chunkCount === 3 && r1.node.size === big.length, 'TG 分片上传 40MB (3 片, 缺片 commit 被拒)');
 const id = r1.node.id;
-const part = await fetch(`${BASE}/api/v1/files/${id}/content`, { headers: { ...H, Range: 'bytes=16777200-16777300' } });
+const part = await fetch(`${BASE}/api/v1/files/${id}/content`, { headers: { ...H, Range: 'bytes=19922900-19923000' } });
 const pb = Buffer.from(await part.arrayBuffer());
-ok(part.status === 206 && pb.equals(big.subarray(16777200, 16777301)), '跨分片 Range 正确');
+ok(part.status === 206 && pb.equals(big.subarray(19922900, 19923001)), '跨分片 Range 正确');
 const full = Buffer.from(await (await fetch(`${BASE}/api/v1/files/${id}/content`, { headers: H })).arrayBuffer());
 ok(full.equals(big), '完整下载一致');
 
@@ -66,12 +72,15 @@ ok(full.equals(big), '完整下载一致');
 const r2 = await chunkUpload(`${P}/files`, 'big-copy.bin', big, 'application/octet-stream');
 ok(r2.done === true, '同哈希秒传');
 
-// 视频: 走 R2 multipart
+// 视频: 同样走 TG, 后缀 Range
 const vid = rand(20 * 1024 * 1024);
 const r3 = await chunkUpload(`${P}/video`, 'v.mp4', vid, 'video/mp4');
-ok(r3.driver === 'r2', '视频路由到 R2');
 const vr = await fetch(`${BASE}/api/v1/files/${r3.node.id}/content`, { headers: { ...H, Range: 'bytes=-100' } });
-ok(Buffer.from(await vr.arrayBuffer()).equals(vid.subarray(-100)), 'R2 Range 正确');
+ok(Buffer.from(await vr.arrayBuffer()).equals(vid.subarray(-100)), '视频后缀 Range 正确');
+
+// 篡改回执
+const t2 = await j('POST', '/api/v1/uploads', { path: `${P}/files`, name: 'x.bin', size: 10 });
+ok((await j('POST', '/api/v1/uploads/commit', { ticket: t2.body.ticket, receipts: ['abc.def'] })).status === 400, '伪造回执被拒');
 
 // 目录, 移动, 搜索, 回收站
 const ls = await j('GET', `/api/v1/fs/list?path=${P}/files`);
@@ -109,5 +118,5 @@ ok((await fetch(sh.body.url)).status === 401, '分享需要密码');
 ok(Buffer.from(await (await fetch(sh.body.url + '?p=pw')).arrayBuffer()).equals(vid), '分享下载');
 
 const stats = await j('GET', '/api/v1/admin/stats');
-console.log('stats', JSON.stringify(stats.body.blobs), 'chunks', JSON.stringify(stats.body.chunks));
+console.log('stats', JSON.stringify(stats.body.blobs));
 console.log(`\n全部通过: ${pass} 项`);

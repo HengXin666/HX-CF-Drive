@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { signLink, verifyLink } from '../src/lib/sign';
-import { chooseDriver } from '../src/lib/route';
+import { openJson, sealJson, signLink, verifyLink } from '../src/lib/sign';
 import { splitPath, validName } from '../src/lib/util';
-import { chunked } from '../src/services/upload';
-import { sliceStream } from '../src/drivers/tg';
+import { chunkCountOf, expectedChunkSize, takeBytes } from '../src/services/upload';
+import { multipartFrame, sliceStream } from '../src/drivers/tg';
+import { fitBudget } from '../src/services/serve';
 
 describe('签名直链', () => {
   it('正确签名通过, 篡改失败', async () => {
@@ -19,13 +19,38 @@ describe('签名直链', () => {
   });
 });
 
-describe('路由策略', () => {
-  const cfg = { videoTo: 'r2' as const, r2MinBytes: 200 * 1024 * 1024, hasBots: true };
-  it('图片走 TG', () => expect(chooseDriver('image/png', 5e6, cfg)).toBe('tg'));
-  it('视频走 R2', () => expect(chooseDriver('video/mp4', 5e7, cfg)).toBe('r2'));
-  it('大文件走 R2', () => expect(chooseDriver('application/zip', 3e8, cfg)).toBe('r2'));
-  it('没有 Bot 全走 R2', () => expect(chooseDriver('image/png', 1, { ...cfg, hasBots: false })).toBe('r2'));
-  it('显式指定', () => expect(chooseDriver('video/mp4', 1, cfg, 'tg')).toBe('tg'));
+describe('上传凭证与回执', () => {
+  it('签名对象可解出, 篡改或换用途失败', async () => {
+    const s = await sealJson('k', 'up', { a: 1, n: '图片.png' });
+    expect(await openJson('k', 'up', s)).toEqual({ a: 1, n: '图片.png' });
+    expect(await openJson('k', 'rc', s)).toBeNull();
+    expect(await openJson('k2', 'up', s)).toBeNull();
+    expect(await openJson('k', 'up', 'x' + s)).toBeNull();
+  });
+  it('分片数与末片大小', () => {
+    expect(chunkCountOf(10, 4)).toBe(3);
+    expect(expectedChunkSize(10, 4, 2)).toBe(2);
+    expect(expectedChunkSize(8, 4, 1)).toBe(4);
+  });
+});
+
+describe('子请求预算', () => {
+  const C = 10;
+  it('冷分片每片 2 次', () => expect(fitBudget({ start: 0, end: 99 }, C, 6, () => false)).toEqual({ start: 0, end: 29 }));
+  it('热分片每片 1 次', () => expect(fitBudget({ start: 0, end: 99 }, C, 6, () => true)).toEqual({ start: 0, end: 59 }));
+  it('从中间开始, 末片不完整', () => expect(fitBudget({ start: 15, end: 33 }, C, 48, () => false)).toEqual({ start: 15, end: 33 }));
+});
+
+describe('multipart 帧', () => {
+  it('拼上内容后能被标准解析器读出', async () => {
+    const { head, tail } = multipartFrame('bb', { chat_id: '-100', x: 'y' }, 'a.bin');
+    const data = new Uint8Array([1, 2, 3, 13, 10]);
+    const body = new Uint8Array([...head, ...data, ...tail]);
+    const fd = await new Request('http://x', { method: 'POST', headers: { 'content-type': 'multipart/form-data; boundary=bb' }, body }).formData();
+    expect(fd.get('chat_id')).toBe('-100');
+    const f = fd.get('document') as unknown as File;
+    expect([...new Uint8Array(await f.arrayBuffer())]).toEqual([1, 2, 3, 13, 10]);
+  });
 });
 
 describe('路径与文件名', () => {
@@ -50,15 +75,16 @@ function streamOf(parts: number[]): ReadableStream<Uint8Array> {
 }
 
 describe('流切片', () => {
-  it('chunked 按固定大小切', async () => {
-    const sizes: number[] = [];
-    let total = 0;
-    for await (const b of chunked(streamOf([7, 3, 11, 1]), 5)) {
-      sizes.push(b.byteLength);
-      total += b.byteLength;
+  it('takeBytes 按固定大小切成子流, 不丢字节', async () => {
+    const reader = streamOf([7, 3, 11, 1]).getReader();
+    const carry = { buf: null as Uint8Array | null };
+    const out: number[][] = [];
+    for (let i = 0; i < chunkCountOf(22, 5); i++) {
+      const sub = takeBytes(reader, carry, expectedChunkSize(22, 5, i));
+      out.push([...new Uint8Array(await new Response(sub).arrayBuffer())]);
     }
-    expect(sizes).toEqual([5, 5, 5, 5, 2]);
-    expect(total).toBe(22);
+    expect(out.map((x) => x.length)).toEqual([5, 5, 5, 5, 2]);
+    expect(out.flat()).toEqual([...Array(22).keys()]);
   });
   it('sliceStream 裁剪中间段', async () => {
     const out = streamOf([4, 4, 4]).pipeThrough(sliceStream(3, 6));

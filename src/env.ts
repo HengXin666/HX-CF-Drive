@@ -1,9 +1,5 @@
-import type { ChannelLimiter } from './do/limiter';
-
 export interface Env {
   DB: D1Database;
-  BUCKET: R2Bucket;
-  LIMITER: DurableObjectNamespace<ChannelLimiter>;
   ASSETS: Fetcher;
 
   ADMIN_TOKEN: string;
@@ -11,12 +7,10 @@ export interface Env {
   BOT_TOKENS?: string;
 
   CHUNK_SIZE: string;
-  MAX_CHUNKS_PER_RESPONSE: string;
-  CHANNEL_RATE_PER_MIN: string;
-  ROUTE_VIDEO_TO: string;
-  ROUTE_R2_MIN_BYTES: string;
+  SUBREQ_BUDGET: string;
+  SEARCH_PER_MIN: string;
   TRASH_DAYS: string;
-  R2_PUBLIC_BASE?: string;
+  EDGE_CACHE?: string;
   TG_API_BASE?: string;
 }
 
@@ -32,4 +26,11 @@ export type AppEnv = { Bindings: Env; Variables: { principal: Principal } };
 export function num(v: string | undefined, d: number): number {
   const n = Number(v);
   return Number.isFinite(n) && n > 0 ? n : d;
+}
+
+/** TG getFile 上限 20MB, 分片取 19MiB 留余量 */
+export const MAX_TG_CHUNK = 19 * 1024 * 1024;
+
+export function chunkSizeOf(env: Env): number {
+  return Math.min(num(env.CHUNK_SIZE, MAX_TG_CHUNK), MAX_TG_CHUNK);
 }

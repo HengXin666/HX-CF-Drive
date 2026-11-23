@@ -1,14 +1,20 @@
 # HX-CF-Drive
 
-全部运行在 Cloudflare 上的网盘网关。目录树在 D1, 热数据和视频在 R2, 冷数据和图片切成 16 MB 分片存进 Telegram 私有频道。对外提供 REST API, WebDAV, 签名直链和分享链接。
+全部运行在 Cloudflare 上的网盘网关。目录树在 D1, 文件切成 19 MiB 分片存进 Telegram 私有频道, **不使用 R2**。对外提供 REST API, WebDAV, 签名直链和分享链接。
 
-## 特性
+> v0.2 目标: CF 各项额度尽量少用, Worker CPU 尽量低。下面的数字按代码路径推导, 未在线上实测。
 
-- 双后端: R2 (快, 按量付费) + Telegram (免费, 有限速), 按 MIME 和大小自动路由, 也可以按请求指定。
-- 目录树: 文件夹, 移动, 重命名, 复制 (只复制元数据), 回收站 (默认保留 7 天), 文件名搜索。
-- 分片上传: 断点续传, 幂等重传, sha256 秒传。
-- 读取: HTTP Range, 视频拖动, 跨分片拼接, 小文件边缘缓存, R2 公开域名直出。
-- 风控: Bot 池 x 频道池, Durable Object 全局限速 (默认每频道 15 条/分), 严格服从 `retry_after`, Bot 失效自动换 Bot 重新取 `file_id`。
+## 特性与额度消耗
+
+- 上传无状态: init (D1 只读) → chunk (D1 零读写, 请求体流式直通 TG, 返回签名回执) → commit (一次批量写约 4 行, 含索引)。断点续传靠客户端保存回执。
+- 秒传: 浏览器本地算 sha256, 命中时 1 次请求, 写 2 行。
+- 分片清单整体存一行 JSON, 读一个文件只读 1 行; 清单, file_path, 节点都缓存在 isolate 内存, 热文件 D1 零读, getFile 零次。
+- 单次响应按子请求预算 (`SUBREQ_BUDGET`, 免费 48) 动态拼片: 冷分片 2 次, 热分片 1 次。拼不完返回 206, 前端 / 播放器 / 下载器按 Range 续拉。
+- 不用 Durable Object: Bot 冷却放内存, TG 429 直接回给客户端按 Retry-After 重试, 下次自动换 Bot。
+- 去掉审计日志, 分享计数, 令牌最后使用时间, 频道消息计数等每次操作都要写的行。
+- 模糊搜索会扫全表, 按令牌限频 (`SEARCH_PER_MIN`, 默认 6/分)。按路径或 ID 访问是索引查找。
+- 定时任务每天一次; 静态前端直接由 Assets 返回, 不进 Worker。
+- CPU: 下载由 FixedLengthStream 原生搬运; 上传不再 `arrayBuffer()`, multipart 头尾 + 请求体原生管道拼接; 服务端不算哈希。
 - 接入: REST API, WebDAV (rclone, RaiDrive, Finder, Infuse, OpenList), PicGo, ShareX, 受限 API 令牌。
 - 运维: 定时任务每 15 分钟做 Bot 探活, 清理过期上传, 回收站清理, 删除频道消息。
 

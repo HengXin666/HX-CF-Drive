@@ -8,8 +8,6 @@ import { pub } from './routes/public';
 import { runMaintenance } from './services/maintenance';
 import { setTgApiBase } from './drivers/tg';
 
-export { ChannelLimiter } from './do/limiter';
-
 const app = new Hono<AppEnv>();
 
 app.onError((err, c) => {
@@ -32,7 +30,7 @@ app.use(
 );
 app.use('/f/*', cors({ origin: '*', exposeHeaders: ['Content-Range', 'Content-Length', 'ETag'] }));
 
-app.get('/api/health', (c) => c.json({ ok: true, name: 'HX-CF-Drive', version: '0.1.0' }));
+app.get('/api/health', (c) => c.json({ ok: true, name: 'HX-CF-Drive', version: '0.2.0' }));
 app.route('/api/v1', api);
 app.route('/dav', dav);
 app.route('/', pub);

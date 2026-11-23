@@ -1,63 +1,47 @@
 /**
- * 定时维护 (默认每 15 分钟)。免费计划单次调用 50 个子请求, 这里把 TG 调用控制在 ~30 次以内。
- * 1. 从 BOT_TOKENS 补种 Bot; 冷却到期 / 失效 Bot 探活
- * 2. 过期上传会话 → 中止
- * 3. 回收站超期 → 硬删除节点, blob 引用归零 → 标记 purging
- * 4. purging 的 blob → 删 R2 对象 / 删 TG 消息
- * 5. 审计日志保留 30 天
+ * 定时维护 (默认每天一次)。免费计划单次调用 50 个子请求, TG 调用控制在 40 次以内。
+ * 1. 从 BOT_TOKENS 补种 Bot; dead Bot 探活
+ * 2. 回收站超期 → 硬删除节点, blob 引用减一
+ * 3. 引用归零的 blob → 删 TG 消息, 删行
+ * 没有活干时只有几次空查询, D1 读写接近零。
  */
 import type { Env } from '../env';
 import { num } from '../env';
-import { r2Key } from '../drivers/r2';
-import { allBots, deleteMessage, markBot, seedBotsFromEnv, tgCall } from '../drivers/tg';
+import { allBots, deleteMessage, invalidateBotCache, seedBotsFromEnv, tgCall } from '../drivers/tg';
 import { now } from '../lib/util';
-import { abortUpload, type SessionRow } from './upload';
+import { forgetBlob } from './serve';
+import type { ChunkRef } from './upload';
 
-const TG_BUDGET = 30;
+const TG_BUDGET = 40;
 
 export async function runMaintenance(env: Env): Promise<Record<string, number>> {
-  const out: Record<string, number> = { seeded: 0, probed: 0, sessions: 0, nodes: 0, blobs: 0, tgDeletes: 0 };
+  const out: Record<string, number> = { seeded: 0, revived: 0, nodes: 0, blobs: 0, tgDeletes: 0 };
   let budget = TG_BUDGET;
-  const t = now();
 
   out.seeded = await seedBotsFromEnv(env);
 
-  // 1. 探活: 冷却已到期的, 以及每小时一次检查 dead 的
-  for (const b of await allBots(env)) {
-    if (budget <= 0) break;
-    const due = (b.status === 'cooldown' && b.retry_until <= t) || (b.status === 'dead' && b.retry_until <= t);
-    if (!due) continue;
+  // 1. dead Bot 探活 (token 被撤销的会一直失败, 最多试 3 个)
+  for (const b of (await allBots(env)).filter((x) => x.status === 'dead').slice(0, 3)) {
     budget--;
-    out.probed++;
     try {
       const me = await tgCall<{ username: string }>(b.token, 'getMe');
-      await env.DB.prepare('UPDATE bots SET username = ? WHERE id = ?').bind(me.username, b.id).run();
-      await markBot(env, b.id, 'active');
-      await env.LIMITER.get(env.LIMITER.idFromName('global')).clear(b.id);
-    } catch (e) {
-      await markBot(env, b.id, b.status, t + 3600_000, String(e));
+      await env.DB.prepare("UPDATE bots SET status = 'active', username = ?, last_error = NULL WHERE id = ?").bind(me.username, b.id).run();
+      out.revived++;
+    } catch {
+      /* 继续保持 dead */
     }
   }
+  if (out.revived) invalidateBotCache();
 
-  // 2. 过期上传会话
-  const stale = await env.DB.prepare('SELECT * FROM upload_sessions WHERE expires_at < ? LIMIT 20').bind(t).all<SessionRow>();
-  for (const s of stale.results) {
-    await abortUpload(env, s);
-    out.sessions++;
-  }
-
-  // 3. 回收站超期: 只处理文件节点的 blob 引用, 然后整批硬删除
-  const cutoff = t - num(env.TRASH_DAYS, 7) * 86400_000;
+  // 2. 回收站超期
+  const cutoff = now() - num(env.TRASH_DAYS, 7) * 86400_000;
   const expired = await env.DB.prepare('SELECT id, blob_id FROM nodes WHERE deleted_at IS NOT NULL AND deleted_at < ? LIMIT 200')
     .bind(cutoff)
     .all<{ id: string; blob_id: string | null }>();
   if (expired.results.length) {
     const stmts = [];
     for (const n of expired.results) {
-      if (n.blob_id) {
-        stmts.push(env.DB.prepare('UPDATE blobs SET ref_count = ref_count - 1 WHERE id = ?').bind(n.blob_id));
-        stmts.push(env.DB.prepare("UPDATE blobs SET status = 'purging' WHERE id = ? AND ref_count <= 0").bind(n.blob_id));
-      }
+      if (n.blob_id) stmts.push(env.DB.prepare('UPDATE blobs SET ref_count = ref_count - 1 WHERE id = ?').bind(n.blob_id));
       stmts.push(env.DB.prepare('DELETE FROM shares WHERE node_id = ?').bind(n.id));
       stmts.push(env.DB.prepare('DELETE FROM nodes WHERE id = ?').bind(n.id));
     }
@@ -65,43 +49,35 @@ export async function runMaintenance(env: Env): Promise<Record<string, number>> 
     out.nodes = expired.results.length;
   }
 
-  // 4. 清理 purging 的 blob
-  const purging = await env.DB.prepare("SELECT id, driver FROM blobs WHERE status = 'purging' LIMIT 10").all<{ id: string; driver: string }>();
-  const bots = new Map((await allBots(env)).map((b) => [b.id, b]));
-  for (const b of purging.results) {
-    if (b.driver === 'r2') {
-      await env.BUCKET.delete(r2Key(b.id));
-      await env.DB.batch([
-        env.DB.prepare('DELETE FROM chunks WHERE blob_id = ?').bind(b.id),
-        env.DB.prepare('DELETE FROM blobs WHERE id = ?').bind(b.id),
-      ]);
-      out.blobs++;
-      continue;
-    }
-    const chunks = await env.DB.prepare('SELECT idx, channel_id, message_id, bot_id FROM chunks WHERE blob_id = ? LIMIT ?')
-      .bind(b.id, Math.max(budget, 0))
-      .all<{ idx: number; channel_id: string; message_id: number; bot_id: string }>();
-    for (const c of chunks.results) {
-      if (budget <= 0) break;
-      const bot = bots.get(c.bot_id) ?? [...bots.values()].find((x) => x.status === 'active');
-      budget--;
-      try {
-        if (bot) await deleteMessage(bot, c.channel_id, c.message_id);
-      } catch {
-        /* 删不掉就留在频道里, 不影响一致性 */
+  // 3. 清理引用归零的 blob
+  const orphans = await env.DB.prepare('SELECT id, manifest FROM blobs WHERE ref_count <= 0 LIMIT 5').all<{ id: string; manifest: string }>();
+  const bots = await allBots(env);
+  const byId = new Map(bots.map((b) => [b.id, b]));
+  const fallback = bots.find((b) => b.status === 'active');
+  for (const row of orphans.results) {
+    const refs: ChunkRef[] = JSON.parse(row.manifest);
+    const left: ChunkRef[] = [];
+    for (const ch of refs) {
+      if (budget <= 0) {
+        left.push(ch);
+        continue;
       }
-      await env.DB.prepare('DELETE FROM chunks WHERE blob_id = ? AND idx = ?').bind(b.id, c.idx).run();
-      out.tgDeletes++;
+      budget--;
+      const bot = byId.get(ch.b) ?? fallback;
+      try {
+        if (bot) await deleteMessage(bot, ch.c, ch.m);
+        out.tgDeletes++;
+      } catch {
+        // 删不掉 (Bot 没有删除权限等) 就留在频道里, 不影响一致性
+      }
     }
-    const left = await env.DB.prepare('SELECT COUNT(*) AS n FROM chunks WHERE blob_id = ?').bind(b.id).first<{ n: number }>();
-    if (!left || left.n === 0) {
-      await env.DB.prepare('DELETE FROM blobs WHERE id = ?').bind(b.id).run();
-      out.blobs++;
+    forgetBlob(row.id);
+    if (left.length) {
+      await env.DB.prepare('UPDATE blobs SET manifest = ? WHERE id = ?').bind(JSON.stringify(left), row.id).run();
+      break;
     }
-    if (budget <= 0) break;
+    await env.DB.prepare('DELETE FROM blobs WHERE id = ?').bind(row.id).run();
+    out.blobs++;
   }
-
-  // 5. 审计日志保留 30 天
-  await env.DB.prepare('DELETE FROM audit_log WHERE at < ?').bind(t - 30 * 86400_000).run();
   return out;
 }

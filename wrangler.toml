@@ -3,11 +3,12 @@ main = "src/index.ts"
 compatibility_date = "2024-11-01"
 compatibility_flags = ["nodejs_compat"]
 
-# 静态前端 (public/index.html)
+# 静态前端 (public/)。静态资源请求免费, 不计入 Workers 请求数
 [assets]
 directory = "./public"
 binding = "ASSETS"
-run_worker_first = true
+# 先匹配静态文件, 不匹配 (/api /f /s /dav) 才进 Worker, 首页不耗 Workers 请求
+run_worker_first = false
 
 [[d1_databases]]
 binding = "DB"
@@ -15,37 +16,22 @@ database_name = "hx-cf-drive"
 database_id = "REPLACE_WITH_YOUR_D1_ID"
 migrations_dir = "migrations"
 
-[[r2_buckets]]
-binding = "BUCKET"
-bucket_name = "hx-cf-drive"
-
-# 免费计划只能用 SQLite 后端的 Durable Object
-[[durable_objects.bindings]]
-name = "LIMITER"
-class_name = "ChannelLimiter"
-
-[[migrations]]
-tag = "v1"
-new_sqlite_classes = ["ChannelLimiter"]
-
-# 每 15 分钟: Bot 探活, 清理过期上传会话, 回收站分批清理
+# 每天 UTC 19:00 (北京时间凌晨 3 点): Bot 探活, 回收站清理
 [triggers]
-crons = ["*/15 * * * *"]
+crons = ["0 19 * * *"]
 
 [vars]
-# 分片大小 (字节)。TG getFile 上限 20MB, 固定 16MB
-CHUNK_SIZE = "16777216"
-# 单次响应最多拉多少个 TG 分片 (免费计划 50 子请求/次, 留余量)
-MAX_CHUNKS_PER_RESPONSE = "20"
-# 每个频道每分钟最多发多少条 (官方约 20, 压低更安全)
-CHANNEL_RATE_PER_MIN = "15"
-# 路由规则: 视频或大于该字节数的文件走 R2, 其余走 TG
-ROUTE_VIDEO_TO = "r2"
-ROUTE_R2_MIN_BYTES = "209715200"
+# 分片大小 (字节)。TG getFile 上限 20MB, 默认 19MiB, 超过会被自动压到 19MiB
+CHUNK_SIZE = "19922944"
+# 单次响应可用的外部子请求数。免费计划上限 50, 留 2 个余量; Paid 计划可调到 900
+# 冷分片花 2 次 (getFile + 下载), 热分片 1 次
+SUBREQ_BUDGET = "48"
+# 每个令牌每分钟最多模糊搜索几次 (搜索会扫全表)
+SEARCH_PER_MIN = "6"
 # 回收站保留天数
 TRASH_DAYS = "7"
-# 可选: R2 公开桶自定义域名 (例如 https://cdn.example.com), 设置后 R2 文件直链绕过 Worker
-R2_PUBLIC_BASE = ""
+# 1 = 永久直链的小文件 (≤25MB) 写入边缘缓存。只在自定义域名上生效, workers.dev 上无效
+EDGE_CACHE = "0"
 
 # 机密信息用 `wrangler secret put` 设置, 不要写在这里:
 #   ADMIN_TOKEN   管理员令牌
