@@ -69,6 +69,7 @@ node scripts/e2e.mjs # 端到端冒烟
 | [docs/DEPLOY.md](docs/DEPLOY.md) | 从零部署到 Cloudflare |
 | [docs/INTEGRATION.md](docs/INTEGRATION.md) | API, WebDAV, PicGo, ShareX, rclone 接入 |
 | [docs/TELEGRAM.md](docs/TELEGRAM.md) | 存储小号, 私有频道, Bot 池配置与风控 |
+| [docs/COMPARISON.md](docs/COMPARISON.md) | 与 CloudFlare-ImgBed, Teldrive 等成熟方案对比 |
 
 ## 已知限制
 
