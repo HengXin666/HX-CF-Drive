@@ -33,7 +33,7 @@ jobs:
           cache-dependency-path: web/package-lock.json
 
       - id: pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
 
       - name: 安装依赖
         run: npm ci --prefix web
@@ -49,7 +49,7 @@ jobs:
           npx vite build
           test -f ../dist/demo/404.html
 
-      - uses: actions/upload-pages-artifact@v4
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: dist/demo
 
@@ -61,4 +61,4 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
