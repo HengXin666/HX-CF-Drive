@@ -20,7 +20,7 @@ export function Shares() {
   }, []);
   useEffect(() => { void load(); }, [load]);
 
-  const url = (id: string) => `${location.origin}/s/${id}`;
+  const url = (id: string) => `${location.origin}${import.meta.env.BASE_URL}s/${id}`;
   const revoke = async (s: ShareRow) => {
     try {
       await shares.remove(s.id);

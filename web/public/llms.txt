@@ -6,8 +6,8 @@
 
 ## 文档
 
-- [Agent Skill](/skill.md): 给 AI Agent 的完整使用说明, 含分片上传, 大文件下载和命令行脚本用法
-- [接口文档](/#/docs): 全部接口, 请求体, 返回值和 curl 示例
+- [Agent Skill](skill.md): 给 AI Agent 的完整使用说明, 含分片上传, 大文件下载和命令行脚本用法
+- [接口文档](./#/docs): 全部接口, 请求体, 返回值和 curl 示例
 - [源码](https://github.com/HengXin666/HX-CF-Drive)
 
 ## 常用接口

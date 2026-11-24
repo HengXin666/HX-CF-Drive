@@ -19,6 +19,11 @@
 </p>
 
 <p>
+<a href="https://hengxin666.github.io/HX-CF-Drive/"><img alt="在线演示 (纯前端)" src="https://img.shields.io/badge/%E5%9C%A8%E7%BA%BF%E6%BC%94%E7%A4%BA-%E7%BA%AF%E5%89%8D%E7%AB%AF-7c8cff?style=for-the-badge&logo=githubpages&logoColor=white"></a><br>
+<a href="https://hengxin666.github.io/HX-CF-Drive/"><b>在线演示 (纯前端)</b></a>: 接口在浏览器内模拟, 数据只存在你的浏览器里, 不连接任何后端或 Telegram
+</p>
+
+<p>
 <a href="#-快速开始">快速开始</a> |
 <a href="docs/DEPLOY.md">部署指南</a> |
 <a href="docs/INTEGRATION.md">接入文档</a> |

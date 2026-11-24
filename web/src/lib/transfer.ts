@@ -1,6 +1,7 @@
 // 上传与大文件下载。上传进度 (凭证 + 回执) 存 localStorage, 刷新后重传同一文件自动续传
 import { api, auth } from './api';
 import { sha256File } from './sha256';
+import { demoDownload } from '../demo/media';
 
 export interface Progress { phase: 'hash' | 'upload' | 'done' | 'error'; ratio: number; note?: string }
 
@@ -58,6 +59,7 @@ type SavePicker = (o: { suggestedName: string }) => Promise<{ createWritable: ()
  * 支持 File System Access API 时按 Content-Range 一段段续拉写入本地; 否则交给浏览器普通下载。
  */
 export async function download(url: string, name: string, size: number, onProgress: (r: number) => void): Promise<void> {
+  if (__DEMO__) return demoDownload(url, name);
   const picker = (window as unknown as { showSaveFilePicker?: SavePicker }).showSaveFilePicker;
   const big = size > 400 * 1024 * 1024;
   if (!picker || !big) {

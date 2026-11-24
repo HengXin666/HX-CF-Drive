@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { fmtSize, type Node } from '../lib/api';
 import { Button, Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui';
 import { Icon } from './Icon';
+import { useDemoSrc } from '../demo/media';
 
 export interface PreviewTarget { node: Node; url: string }
 
@@ -16,6 +17,8 @@ function TextView({ url }: { url: string }) {
 
 export function Preview({ target, onClose, onDownload }: { target: PreviewTarget | null; onClose: () => void; onDownload: (n: Node) => void }) {
   const mime = target?.node.mime ?? '';
+  // 演示模式: 直链只存在于浏览器内的拦截层, 媒体元素先换成 blob URL
+  const src = __DEMO__ ? useDemoSrc(target?.url) : target?.url;
   return (
     <Dialog open={!!target} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="w-[min(92vw,1000px)] max-w-none sm:max-w-none">
@@ -31,15 +34,15 @@ export function Preview({ target, onClose, onDownload }: { target: PreviewTarget
           </DialogTitle>
         </DialogHeader>
         {target && (mime.startsWith('image/') ? (
-          <img src={target.url} alt={target.node.name} className="max-h-[72vh] w-full rounded-lg object-contain" />
+          <img src={src} alt={target.node.name} className="max-h-[72vh] w-full rounded-lg object-contain" />
         ) : mime.startsWith('video/') ? (
-          <video src={target.url} controls autoPlay className="max-h-[72vh] w-full rounded-lg bg-black" />
+          <video src={src} controls autoPlay className="max-h-[72vh] w-full rounded-lg bg-black" />
         ) : mime.startsWith('audio/') ? (
-          <audio src={target.url} controls autoPlay className="w-full" />
+          <audio src={src} controls autoPlay className="w-full" />
         ) : mime.startsWith('text/') ? (
           <TextView url={target.url} />
         ) : (
-          <iframe src={target.url} title={target.node.name} className="h-[72vh] w-full rounded-lg bg-white" />
+          <iframe src={src} title={target.node.name} className="h-[72vh] w-full rounded-lg bg-white" />
         ))}
       </DialogContent>
     </Dialog>

@@ -1,0 +1,64 @@
+# 纯前端演示站: 用 VITE_DEMO=1 构建 web/, 接口全部在浏览器内模拟, 发布到 GitHub Pages
+name: Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - 'skills/hx-cf-drive/SKILL.md'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - id: pages
+        uses: actions/configure-pages@v5
+
+      - name: 安装依赖
+        run: npm ci --prefix web
+
+      # base_path 形如 /HX-CF-Drive; 绑定自定义域名后为空, 站点子路径随之变成 /
+      - name: 类型检查并构建演示站
+        working-directory: web
+        env:
+          VITE_DEMO: '1'
+          DEMO_BASE: ${{ steps.pages.outputs.base_path }}/
+        run: |
+          npx tsc -b
+          npx vite build
+          test -f ../dist/demo/404.html
+
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: dist/demo
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

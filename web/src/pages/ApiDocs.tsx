@@ -55,14 +55,14 @@ function Row({ e, base }: { e: Endpoint; base: string }) {
 }
 
 export function ApiDocs() {
-  const base = location.origin;
+  const base = location.origin + import.meta.env.BASE_URL.replace(/\/$/, '');
   return (
     <Page
       title="接口文档"
       right={
         <>
-          <Button size="sm" variant="outline" onClick={() => window.open('/llms.txt', '_blank')}><Icon name="fileText" /> llms.txt</Button>
-          <Button size="sm" variant="primary" onClick={() => window.open('/skill.md', '_blank')}><Icon name="bolt" /> Agent Skill</Button>
+          <Button size="sm" variant="outline" onClick={() => window.open(`${import.meta.env.BASE_URL}llms.txt`, '_blank')}><Icon name="fileText" /> llms.txt</Button>
+          <Button size="sm" variant="primary" onClick={() => window.open(`${import.meta.env.BASE_URL}skill.md`, '_blank')}><Icon name="bolt" /> Agent Skill</Button>
         </>
       }
     >

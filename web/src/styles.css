@@ -6,6 +6,8 @@
 
 /* 让 Tailwind 扫描 HX-UI 组件里用到的类名 */
 @source "../node_modules/@hx/ui/dist";
+/* 正常构建不扫描演示层; 演示构建时 vite.config.ts 会去掉这一行 */
+@source not "./demo";
 
 html, body, #root { height: 100%; }
 

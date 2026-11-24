@@ -7,6 +7,9 @@
 
 <p align="center"><img src="assets/deploy-flow.svg" width="100%" alt="GitHub Actions 一键部署流程"></p>
 
+> [!TIP]
+> 部署前想先看看界面, 可以打开 [在线演示 (纯前端)](https://hengxin666.github.io/HX-CF-Drive/): 它由 `.github/workflows/pages.yml` 用 `VITE_DEMO=1` 构建并发布到 GitHub Pages, 接口全在浏览器内模拟, 数据只存在本地, 不连接任何后端或 Telegram。本地预览: `cd web && npm run build:demo && VITE_DEMO=1 npx vite preview`。
+
 **目录**
 
 1. [准备 Telegram](#1-准备-telegram)
