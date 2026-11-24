@@ -91,7 +91,7 @@ jobs:
           set -o pipefail
           npm run build:web
           npx wrangler deploy 2>&1 | tee deploy.log
-          url=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' deploy.log | head -1)
+          url=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' deploy.log | head -1 || true)
           echo "url=${URL_OVERRIDE:-$url}" >> "$GITHUB_OUTPUT"
         env:
           URL_OVERRIDE: ${{ vars.PUBLIC_URL }}
