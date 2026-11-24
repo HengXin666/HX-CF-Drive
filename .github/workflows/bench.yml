@@ -1,33 +1,32 @@
-# 线上轻量实测 (约 250 次请求, 上传约 90MB 到 TG), 每类操作占一个整分钟, 再从 CF GraphQL 取 CPU 和 D1 行数
-# 令牌需要额外的 "账户 / 账户分析 / 读取" 权限才能取到 CPU
+# 线上实测的统计部分: 先在自己机器跑 scripts/bench.mjs 得到各阶段的整分钟,
+# 再把 phases 传进来, 这里用 CF 令牌从 GraphQL 取每分钟的 CPU / 子请求 / D1 行数
+# 令牌需要额外的 "账户 / 账户分析 / 读取" 权限才能取到 Workers CPU
 name: Bench
 
 on:
   workflow_dispatch:
+    inputs:
+      client:
+        description: 'bench.mjs 输出的 JSON (base64)'
+        required: true
 
 jobs:
-  bench:
-    if: vars.PUBLIC_URL != ''
+  stats:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
           node-version: 22
-      - name: 压测
-        env:
-          BASE: ${{ vars.PUBLIC_URL }}
-          ADMIN: ${{ secrets.ADMIN_TOKEN }}
-        run: node scripts/bench.mjs > bench-client.json
-      - name: 等 CF 统计入库
-        run: sleep 180
       - name: 取 CF 统计
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           D1_NAME: ${{ vars.D1_NAME || 'hx-cf-drive' }}
+          CLIENT: ${{ inputs.client }}
         run: |
+          echo "$CLIENT" | base64 -d > bench-client.json
           npm ci --ignore-scripts
           export D1_ID=$(npx wrangler d1 list --json | jq -r --arg n "$D1_NAME" '.[] | select(.name==$n) | .uuid')
           node scripts/cfstats.mjs bench-client.json > bench.json

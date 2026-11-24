@@ -1,16 +1,28 @@
 // 线上轻量实测: 每类操作独占一个整分钟, 便于按分钟从 CF GraphQL 取 CPU 和 D1 行数
-// BASE=https://... ADMIN=... node scripts/bench.mjs > bench-client.json
+// 在自己机器上跑 (CF 会对 GitHub Actions 机房 IP 的 node 请求弹人机验证):
+// BASE=https://... ADMIN=... node scripts/bench.mjs > bench-client.json, 再用 Bench 工作流取 CF 统计
 // 总量约 250 次请求, 上传约 90MB 到 TG, 不到 Free 日额度的 1%
 import crypto from 'node:crypto';
 
 const BASE = process.env.BASE;
-const H = { Authorization: `Bearer ${process.env.ADMIN}`, 'User-Agent': 'hxd-bench/1' };
+const H = { Authorization: `Bearer ${process.env.ADMIN}`, 'User-Agent': 'hxd/1' };
 const P = `/bench-${Date.now()}`;
 const phases = [];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const sha = (b) => crypto.createHash('sha256').update(b).digest('hex');
 
+let retries = 0;
+// TG 限流 (单频道约 20 条/分) 时服务端回 429, 客户端退避重试
 async function call(method, path, body, headers = {}) {
+  for (let k = 0; ; k++) {
+    try { return await call1(method, path, body, headers); } catch (e) {
+      if (!String(e.message).includes(' 429 ') || k >= 6) throw e;
+      retries++;
+      await sleep(5000 * (k + 1));
+    }
+  }
+}
+async function call1(method, path, body, headers = {}) {
   const isJson = body && !(body instanceof Uint8Array) && !(body instanceof FormData);
   const t = performance.now();
   const r = await fetch(BASE + path, {
@@ -44,11 +56,8 @@ async function phase(key, label, n, fn) {
 }
 
 // 准备: 一个 50 项目录 + 一个 40MB 文件 + 一张 300KB 图片 (不计入阶段)
-for (let i = 0; i < 50; i++) {
-  const t = await call('POST', '/api/v1/uploads', { path: `${P}/many`, name: `f${i}.txt`, size: 1 });
-  const c = await call('PUT', `/api/v1/uploads/chunk?i=0&ticket=${encodeURIComponent(t.json.ticket)}`, Buffer.from('x'));
-  await call('POST', '/api/v1/uploads/commit', { ticket: t.json.ticket, receipts: [c.json.receipt] });
-}
+// 空文件共用 'empty' blob, 不占 TG 消息
+for (let i = 0; i < 50; i++) await call('POST', '/api/v1/uploads', { path: `${P}/many`, name: `f${i}.txt`, size: 0 });
 const img = crypto.randomBytes(300 * 1024);
 
 await phase('stat', '按路径 stat', 30, () => call('GET', `/api/v1/fs/stat?path=${P}/many/f1.txt`));
@@ -86,4 +95,4 @@ await phase('search', '模糊搜索', 5, () => call('GET', '/api/v1/fs/search?q=
 
 // 清理: 移进回收站, 每日维护会回收
 await call('POST', '/api/v1/fs/delete', { path: P });
-console.log(JSON.stringify({ base: BASE, prefix: P, phases }, null, 2));
+console.log(JSON.stringify({ base: BASE, prefix: P, retries, phases }, null, 2));
