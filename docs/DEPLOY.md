@@ -4,6 +4,49 @@
 
 > 条款提示: Cloudflare 自助服务条款要求非企业用户通过付费服务 (含 Developer Platform) 分发视频和大文件, 否则 CDN 可能被限制。大量放视频建议上 Workers Paid ($5/月)。
 
+## 用 GitHub Actions 部署 (推荐)
+
+工作流在 `.github/workflows/deploy.yml`: 自动建 D1 (已存在则复用) 和建表, 跑类型检查与单测, 构建前端, 部署 Worker, 写入机密, 最后冒烟。仓库里的 `database_id` 不用填, CI 会自己查出来写进去。
+
+### 1. Cloudflare 侧 (只做一次)
+
+1. 记下账户 ID: 控制台首页右侧 "Account ID"。
+2. 建 API 令牌: 我的个人资料, API 令牌, 创建令牌, 选模板 "编辑 Cloudflare Workers", 再加一行权限 `账户 / D1 / 编辑`, 账户资源只选自己的账户。
+
+### 2. GitHub 仓库 Settings, Secrets and variables, Actions
+
+| 类型 | 名称 | 必填 | 值 |
+| --- | --- | --- | --- |
+| Secret | `CLOUDFLARE_API_TOKEN` | 是 | 上一步的 API 令牌 |
+| Secret | `CLOUDFLARE_ACCOUNT_ID` | 是 | 账户 ID |
+| Secret | `ADMIN_TOKEN` | 是 | 管理员令牌, `openssl rand -base64 32` 生成 |
+| Secret | `SIGNING_KEY` | 是 | 直链签名密钥, 同上生成; 改了旧直链全部失效 |
+| Secret | `BOT_TOKENS` | 否 | 逗号分隔的 Bot Token, 也可部署后在后台添加 |
+| Secret | `TG_CHANNEL_ID` | 否 | 存储频道 id (`-100...`), 手动运行勾选 "登记频道" 时用 |
+| Variable | `DEPLOY_ENABLED` | 否 | 设为 `true` 后 push 到 main 自动部署; 不设只能手动触发 |
+| Variable | `D1_NAME` | 否 | D1 库名, 默认 `hx-cf-drive` |
+| Variable | `PUBLIC_URL` | 否 | 绑了自定义域名时填, 冒烟和初始化走这个地址 |
+
+也可以用 gh 命令行设置:
+
+```bash
+gh secret set CLOUDFLARE_API_TOKEN
+gh secret set CLOUDFLARE_ACCOUNT_ID
+openssl rand -base64 32 | gh secret set ADMIN_TOKEN
+openssl rand -base64 32 | gh secret set SIGNING_KEY
+gh secret set BOT_TOKENS
+gh secret set TG_CHANNEL_ID
+gh variable set DEPLOY_ENABLED --body true
+```
+
+### 3. 首次部署
+
+Actions, Deploy, Run workflow, 勾选 "部署后把 TG_CHANNEL_ID 登记为存储频道"。日志最后会列出每个 Bot 在频道里的状态, 都是 `ok` 即完成。之后 push 到 main 自动部署 (只改文档不会触发)。
+
+部署地址在运行摘要里, 形如 `https://hx-cf-drive.<子域>.workers.dev`。
+
+下面是手动部署的步骤, 用了工作流可以跳过。
+
 ## 1. 安装与登录
 
 ```bash

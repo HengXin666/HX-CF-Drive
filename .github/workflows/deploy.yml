@@ -1,0 +1,118 @@
+# 部署到 Cloudflare Workers: push 到 main 或在 Actions 页面手动触发
+# 需要的仓库 Secrets 见 docs/DEPLOY.md "用 GitHub Actions 部署"
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['docs/**', '**.md']
+  workflow_dispatch:
+    inputs:
+      setup_channel:
+        description: '部署后把 TG_CHANNEL_ID 登记为存储频道'
+        type: boolean
+        default: false
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # 上游仓库默认不自动部署; 自己的部署仓库把变量 DEPLOY_ENABLED 设为 true 后, push 才会触发
+    if: github.event_name == 'workflow_dispatch' || vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      D1_NAME: ${{ vars.D1_NAME || 'hx-cf-drive' }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+
+      - name: 检查 Secrets
+        env:
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+        run: |
+          miss=""
+          for k in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID ADMIN_TOKEN SIGNING_KEY; do
+            [ -n "${!k}" ] || miss="$miss $k"
+          done
+          [ -z "$miss" ] || { echo "::error::缺少仓库 Secrets:$miss"; exit 1; }
+
+      - name: 安装依赖
+        run: |
+          npm ci
+          npm ci --prefix web
+
+      - name: 测试
+        run: |
+          npm run typecheck
+          npm test
+
+      # D1 不存在就创建, 再把 id 写进 wrangler.toml (只改 CI 里的副本, 仓库无需填 id)
+      - name: 准备 D1
+        run: |
+          id=$(npx wrangler d1 list --json | jq -r --arg n "$D1_NAME" '.[] | select(.name==$n) | .uuid')
+          if [ -z "$id" ]; then
+            npx wrangler d1 create "$D1_NAME"
+            id=$(npx wrangler d1 list --json | jq -r --arg n "$D1_NAME" '.[] | select(.name==$n) | .uuid')
+          fi
+          [ -n "$id" ] || { echo "::error::拿不到 D1 id"; exit 1; }
+          sed -i "s/^database_name = .*/database_name = \"$D1_NAME\"/; s/^database_id = .*/database_id = \"$id\"/" wrangler.toml
+          npx wrangler d1 migrations apply "$D1_NAME" --remote
+
+      - name: 构建并部署
+        id: deploy
+        run: |
+          npm run build:web
+          npx wrangler deploy 2>&1 | tee deploy.log
+          url=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' deploy.log | head -1)
+          echo "url=${URL_OVERRIDE:-$url}" >> "$GITHUB_OUTPUT"
+        env:
+          URL_OVERRIDE: ${{ vars.PUBLIC_URL }}
+
+      # 机密只在值有变化时才需要重写, 但 bulk 是幂等的, 每次写一遍最省事
+      - name: 写入 Worker 机密
+        env:
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          BOT_TOKENS: ${{ secrets.BOT_TOKENS }}
+        run: |
+          jq -n '{ADMIN_TOKEN: env.ADMIN_TOKEN, SIGNING_KEY: env.SIGNING_KEY}
+            + (if (env.BOT_TOKENS // "") != "" then {BOT_TOKENS: env.BOT_TOKENS} else {} end)' > /tmp/secrets.json
+          npx wrangler secret bulk /tmp/secrets.json
+          rm -f /tmp/secrets.json
+
+      # 首次部署或手动勾选时: 同步 Bot 并登记频道
+      - name: 初始化 Bot 与频道
+        if: github.event_name == 'workflow_dispatch' && inputs.setup_channel
+        env:
+          BASE: ${{ steps.deploy.outputs.url }}
+          ADMIN: ${{ secrets.ADMIN_TOKEN }}
+          CHANNEL: ${{ secrets.TG_CHANNEL_ID }}
+        run: |
+          [ -n "$CHANNEL" ] || { echo "::error::缺少 TG_CHANNEL_ID"; exit 1; }
+          sleep 5
+          curl -fsS -X POST -H "Authorization: Bearer $ADMIN" "$BASE/api/v1/admin/maintenance" > /dev/null
+          curl -fsS -X POST -H "Authorization: Bearer $ADMIN" -H "Content-Type: application/json" \
+            -d "{\"id\":\"$CHANNEL\"}" "$BASE/api/v1/admin/channels" | jq .
+
+      - name: 冒烟
+        env:
+          BASE: ${{ steps.deploy.outputs.url }}
+          ADMIN: ${{ secrets.ADMIN_TOKEN }}
+        run: |
+          sleep 3
+          curl -fsS -o /dev/null "$BASE/"
+          curl -fsS -H "Authorization: Bearer $ADMIN" "$BASE/api/v1/admin/stats" | jq '{bots: [.bots[]? | {username, status}], channels: [.channels[]? | {id, status}]}'
+          echo "### 已部署: $BASE" >> "$GITHUB_STEP_SUMMARY"
