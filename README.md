@@ -43,8 +43,8 @@ src/
   services/serve.ts          读取与流式拼接
   services/maintenance.ts    定时维护
 migrations/                  D1 表结构
-public/index.html            极简 Web 界面
-public/client.js             浏览器端 sha256, 断点续传, 大文件 Range 续拉
+web/                         前端 (React + TS + HX-UI), 构建到 dist/web 由 Assets 直接返回
+  src/lib/transfer.ts        浏览器端 sha256 秒传, 断点续传, 大文件 Range 续拉
 scripts/quota.mjs            免费额度估算 (按实测单次行数)
 scripts/meter.mjs            实测每个操作的 D1 行读写
 scripts/mock-tg.mjs          本地模拟 Telegram
@@ -56,14 +56,22 @@ docs/                        额度, 部署, 接入, Telegram 配置
 ## 快速开始
 
 ```bash
-pnpm install # 或 npm install
+npm install
+npm install --prefix web
 cp .dev.vars.example .dev.vars
-pnpm db:migrate:local
+npm run db:migrate:local
 node scripts/mock-tg.mjs 8887 & # 本地测试可用模拟 Telegram, .dev.vars 里设 TG_API_BASE=http://127.0.0.1:8887
-pnpm dev
-pnpm test # 单元测试
-node scripts/e2e.mjs # 端到端冒烟
+npm run dev                     # Worker, 8787
+npm run dev:web                 # 前端热更新, 5173, 接口代理到 8787
+npm test                        # 单元测试
+node scripts/e2e.mjs            # 端到端冒烟
 ```
+
+## 前端
+
+`web/` 是 React + TypeScript 前端, UI 用 [HX-UI](https://github.com/HengXin666/HX-UI)。功能: 令牌登录, 目录浏览, 拖放上传 (浏览器算 sha256 秒传, 断点续传, 进度), 图片/视频/音频/PDF 预览, 大文件分段下载, 重命名/移动/删除, 回收站, 搜索, 分享与永久直链, 后台 (统计, 频道, Bot, 令牌, 手动维护)。
+
+`npm run build:web` 构建到 `dist/web`, `wrangler deploy` 时作为静态资源上传。静态资源请求不进 Worker, 不计 Workers 请求数。HX-UI 尚未发布到 npm, 暂时以 `web/vendor/hx-ui-*.tgz` 引入。
 
 线上部署见 [docs/DEPLOY.md](docs/DEPLOY.md)。
 
@@ -80,7 +88,7 @@ node scripts/e2e.mjs # 端到端冒烟
 ## 已知限制
 
 - Telegram 单分片 ≤ 20 MB (getFile 上限), 因此固定 19 MiB 分片。
-- 免费计划单次调用最多 50 个外部子请求。冷分片要 2 次 (getFile + 下载), 热分片 1 次, 所以单次响应冷拼 24 片 (约 456 MB), 热拼 48 片, 超出部分 206 截断。不带 Range 的客户端 (如 curl 直接下大文件) 只能拿到第一段; 网页端 `client.js` 和播放器会自动用 Range 续拉。Paid 计划上限 10,000, 把 `SUBREQ_BUDGET` 调大即可。
+- 免费计划单次调用最多 50 个外部子请求。冷分片要 2 次 (getFile + 下载), 热分片 1 次, 所以单次响应冷拼 24 片 (约 456 MB), 热拼 48 片, 超出部分 206 截断。不带 Range 的客户端 (如 curl 直接下大文件) 只能拿到第一段; 网页端和播放器会自动用 Range 续拉。Paid 计划上限 10,000, 把 `SUBREQ_BUDGET` 调大即可。
 - Cache API 在 `*.workers.dev` 上不生效, 边缘缓存需要绑定自定义域名。
 - 搜索用 `LIKE '%q%'`, 未命中时扫全表, 是 D1 读行的主要来源, 已按令牌限频。
 - WebDAV 的 LOCK 是假锁, 只为兼容 Windows 和 Finder。

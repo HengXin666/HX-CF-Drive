@@ -1,0 +1,5 @@
+@import "@hx/ui/styles.css";
+/* 让 Tailwind 扫描 HX-UI 组件里用到的类名 */
+@source "../node_modules/@hx/ui/dist";
+
+html, body, #root { height: 100%; }

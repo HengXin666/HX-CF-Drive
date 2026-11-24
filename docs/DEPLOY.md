@@ -8,6 +8,7 @@
 
 ```bash
 npm install
+npm install --prefix web
 npx wrangler login
 ```
 
@@ -50,7 +51,7 @@ Telegram 侧的准备见 [TELEGRAM.md](TELEGRAM.md)。
 ## 5. 部署
 
 ```bash
-npm run deploy
+npm run deploy # 先构建前端到 dist/web, 再 wrangler deploy
 ```
 
 输出里的 `https://hx-cf-drive.<你的子域>.workers.dev` 就是服务地址。

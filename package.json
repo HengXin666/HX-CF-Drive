@@ -6,13 +6,15 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "deploy": "npm run build:web && wrangler deploy",
     "db:migrate:local": "wrangler d1 migrations apply hx-cf-drive --local",
     "db:migrate": "wrangler d1 migrations apply hx-cf-drive --remote",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "quota": "node scripts/quota.mjs",
-    "meter": "node scripts/meter.mjs"
+    "meter": "node scripts/meter.mjs",
+    "dev:web": "npm --prefix web run dev",
+    "build:web": "npm --prefix web run build"
   },
   "dependencies": {
     "hono": "^4.6.0"

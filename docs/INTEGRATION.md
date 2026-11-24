@@ -45,7 +45,7 @@ curl -X POST -H "Authorization: Bearer $ADMIN" -H "Content-Type: application/jso
 
 ### 分片上传流程
 
-服务端不保存上传中间状态: 初始化返回一个 HMAC 签名的凭证, 每片返回一个签名回执, 最后把回执全部交回来。续传只要客户端留着回执 (`client.js` 存在 localStorage)。凭证 24 小时有效。
+服务端不保存上传中间状态: 初始化返回一个 HMAC 签名的凭证, 每片返回一个签名回执, 最后把回执全部交回来。续传只要客户端留着回执 (网页端存在 localStorage, 见 `web/src/lib/transfer.ts`)。凭证 24 小时有效。
 
 ```bash
 # 1. 初始化。带 sha256 (客户端自己算) 可以秒传
@@ -150,4 +150,4 @@ async function upload(file, path = '/') {
 
 `/f/*` 已开启 CORS, 可以跨域加载。
 
-大文件 (冷读超过约 456 MB) 单次响应会被 206 截断, 浏览器直接点链接下载会只拿到第一段。网页里用 `public/client.js` 的 `downloadLarge`, 或用支持断点续传的下载器 (aria2, IDM)。播放器本身就按 Range 请求, 不受影响。
+大文件 (冷读超过约 456 MB) 单次响应会被 206 截断, 浏览器直接点链接下载会只拿到第一段。网页端会自动按 Content-Range 续拉 (`web/src/lib/transfer.ts` 的 `download`), 或用支持断点续传的下载器 (aria2, IDM)。播放器本身就按 Range 请求, 不受影响。
