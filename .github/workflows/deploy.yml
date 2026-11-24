@@ -71,6 +71,15 @@ jobs:
           sed -i "s/^database_name = .*/database_name = \"$D1_NAME\"/; s/^database_id = .*/database_id = \"$id\"/" wrangler.toml
           npx wrangler d1 migrations apply "$D1_NAME" --remote
 
+      # 有 CUSTOM_DOMAIN 时绑定自定义域名 (域名需托管在同一 CF 账户)
+      - name: 自定义域名
+        if: vars.CUSTOM_DOMAIN != ''
+        env:
+          DOMAIN: ${{ vars.CUSTOM_DOMAIN }}
+        run: |
+          sed -i "/^compatibility_flags/a routes = [{ pattern = \"$DOMAIN\", custom_domain = true }]" wrangler.toml
+          grep -n '^routes' wrangler.toml
+
       - name: 构建并部署
         id: deploy
         run: |
