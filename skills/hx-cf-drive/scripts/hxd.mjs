@@ -7,7 +7,8 @@ import { basename } from 'node:path';
 
 const BASE = (process.env.HXD_BASE ?? '').replace(/\/$/, '');
 const TOKEN = process.env.HXD_TOKEN ?? '';
-const H = { Authorization: `Bearer ${TOKEN}` };
+// CF 默认会对部分 UA (curl, node) 弹人机验证, 带上自定义 UA 避开
+const H = { Authorization: `Bearer ${TOKEN}`, "User-Agent": "hxd/1" };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // 带 429/503 退避的请求
