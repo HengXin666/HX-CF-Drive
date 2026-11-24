@@ -1,0 +1,21 @@
+# 每日维护: Bot 探活, 回收站清理, 删除孤儿分片 (代替 CF Cron, 不占账户 Cron 名额)
+name: Maintenance
+
+on:
+  schedule:
+    - cron: '0 19 * * *' # UTC 19:00 = 北京时间 03:00
+  workflow_dispatch:
+
+jobs:
+  run:
+    if: vars.DEPLOY_ENABLED == 'true' && vars.CF_CRON != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 调用维护接口
+        env:
+          BASE: ${{ vars.PUBLIC_URL }}
+          ADMIN: ${{ secrets.ADMIN_TOKEN }}
+        run: |
+          [ -n "$BASE" ] || { echo "::error::缺少变量 PUBLIC_URL"; exit 1; }
+          curl -fsS --retry 3 -X POST -H "Authorization: Bearer $ADMIN" "$BASE/api/v1/admin/maintenance"

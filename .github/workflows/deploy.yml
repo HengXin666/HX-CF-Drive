@@ -80,9 +80,15 @@ jobs:
           sed -i "/^compatibility_flags/a routes = [{ pattern = \"$DOMAIN\", custom_domain = true }]" wrangler.toml
           grep -n '^routes' wrangler.toml
 
+      # Free 每账户只有 5 个 Cron。默认不占 Cron, 改由 maintenance.yml 每天调接口; 变量 CF_CRON=true 才用 CF Cron
+      - name: Cron 设置
+        if: vars.CF_CRON != 'true'
+        run: sed -i 's/^crons = .*/crons = []/' wrangler.toml
+
       - name: 构建并部署
         id: deploy
         run: |
+          set -o pipefail
           npm run build:web
           npx wrangler deploy 2>&1 | tee deploy.log
           url=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' deploy.log | head -1)

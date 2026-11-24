@@ -24,6 +24,7 @@
 | Secret | `BOT_TOKENS` | 否 | 逗号分隔的 Bot Token, 也可部署后在后台添加 |
 | Secret | `TG_CHANNEL_ID` | 否 | 存储频道 id (`-100...`), 手动运行勾选 "登记频道" 时用 |
 | Variable | `DEPLOY_ENABLED` | 否 | 设为 `true` 后 push 到 main 自动部署; 不设只能手动触发 |
+| Variable | `CF_CRON` | 否 | 设为 `true` 才用 CF Cron 做每日维护; 默认由 maintenance.yml 每天调接口, 不占 Free 账户仅有的 5 个 Cron |
 | Variable | `D1_NAME` | 否 | D1 库名, 默认 `hx-cf-drive` |
 | Variable | `CUSTOM_DOMAIN` | 否 | 绑定的自定义域名, 如 `drive.example.com`, 需托管在同一 CF 账户 |
 | Variable | `PUBLIC_URL` | 否 | 绑了自定义域名时填, 冒烟和初始化走这个地址 |
