@@ -1,8 +1,8 @@
 {
   "name": "hx-cf-drive",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "全部运行在 Cloudflare 上的 R2 + Telegram 双后端网盘网关",
+  "description": "全部运行在 Cloudflare 上的 Telegram 网盘网关 (Workers + D1, 不用 R2)",
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
@@ -11,7 +11,8 @@
     "db:migrate": "wrangler d1 migrations apply hx-cf-drive --remote",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "quota": "node scripts/quota.mjs"
+    "quota": "node scripts/quota.mjs",
+    "meter": "node scripts/meter.mjs"
   },
   "dependencies": {
     "hono": "^4.6.0"

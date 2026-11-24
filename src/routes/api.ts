@@ -6,7 +6,7 @@ import { activeChannels, allBots, invalidateBotCache, invalidateChannelCache, tg
 import { requireScope } from '../lib/auth';
 import { signLink } from '../lib/sign';
 import {
-  assertAccess, getNode, isWithin, listChildren, mkdirp, moveNode, type NodeRow, pathOf, publicNode, resolvePath, restoreNode, trashNode,
+  assertAccess, getNode, isWithin, listChildren, mkdirp, moveNode, type NodeRow, pathFor, pathOf, pathsOf, publicNode, resolvePath, restoreNode, trashNode,
 } from '../lib/tree';
 import { HttpError, newId, now, sha256Hex } from '../lib/util';
 import { runMaintenance } from '../services/maintenance';
@@ -22,7 +22,12 @@ async function locate(c: C, id?: string | null, path?: string | null): Promise<N
   const p = c.get('principal');
   let node: NodeRow | null = null;
   if (id) node = await getNode(c.env, id);
-  else node = await resolvePath(c.env, p.rootId, path ?? '/');
+  else {
+    // 从令牌根解析的路径天然在根之下, 不用再查祖先
+    node = await resolvePath(c.env, p.rootId, path ?? '/');
+    if (!node) throw new HttpError(404, 'not found');
+    return node;
+  }
   if (!node) throw new HttpError(404, 'not found');
   await assertAccess(c.env, p, node.id);
   return node;
@@ -39,12 +44,12 @@ api.get('/fs/list', requireScope('read'), async (c) => {
   const node = await locate(c, c.req.query('id'), c.req.query('path'));
   if (node.kind !== 'dir') return c.json({ node: publicNode(node), children: [] });
   const children = await listChildren(c.env, node.id);
-  return c.json({ node: publicNode(node), path: await pathOf(c.env, node.id), children: children.map(publicNode) });
+  return c.json({ node: publicNode(node), path: await pathFor(c.env, node), children: children.map(publicNode) });
 });
 
 api.get('/fs/stat', requireScope('read'), async (c) => {
   const node = await locate(c, c.req.query('id'), c.req.query('path'));
-  return c.json({ node: publicNode(node), path: await pathOf(c.env, node.id) });
+  return c.json({ node: publicNode(node), path: await pathFor(c.env, node) });
 });
 
 api.post('/fs/mkdir', requireScope('write'), async (c) => {
@@ -130,14 +135,17 @@ api.get('/fs/search', requireScope('read'), async (c) => {
   const limit = Math.min(num(c.req.query('limit'), 50), 200);
   const like = `%${q.replace(/[%_\\]/g, (m) => '\\' + m)}%`;
   const r = await c.env.DB.prepare("SELECT * FROM nodes WHERE deleted_at IS NULL AND name LIKE ? ESCAPE '\\' LIMIT ?")
-    .bind(like, limit * 2)
+    .bind(like, c.get('principal').rootId === 'root' ? limit : limit * 2)
     .all<NodeRow>();
+  // 路径和权限一次批量查完, 不再每条结果查一次
   const p = c.get('principal');
+  const paths = await pathsOf(c.env, r.results);
   const items = [];
   for (const n of r.results) {
     if (items.length >= limit) break;
-    if (p.rootId !== 'root' && !(await isWithin(c.env, n.id, p.rootId))) continue;
-    items.push({ ...publicNode(n), path: await pathOf(c.env, n.id) });
+    const e = paths.get(n.id);
+    if (!e || (p.rootId !== 'root' && !e.ancestors.has(p.rootId))) continue;
+    items.push({ ...publicNode(n), path: e.path });
   }
   return c.json({ items });
 });
@@ -166,7 +174,7 @@ api.post('/uploads', requireScope('write'), async (c) => {
   if (b.parentId) parent = await locate(c, b.parentId);
   else if (b.mkdirs !== false) parent = await mkdirp(c.env, p.rootId, b.path ?? '/');
   else parent = await locate(c, null, b.path ?? '/');
-  const r = await initUpload(c.env, p, { parentId: parent.id, name: b.name, size: b.size, mime: b.mime, sha256: b.sha256, overwrite: b.overwrite });
+  const r = await initUpload(c.env, p, { parentId: parent.id, parent, name: b.name, size: b.size, mime: b.mime, sha256: b.sha256, overwrite: b.overwrite });
   if (r.done) return c.json({ done: true, node: publicNode(r.node), url: await fileLink(c.env, new URL(c.req.url).origin, r.node) });
   return c.json(r);
 });
@@ -207,14 +215,14 @@ api.post('/upload', requireScope('write'), async (c) => {
       if (typeof v === 'string') continue;
       const f = v as File;
       const name = c.req.query('rename') === '1' ? renameRandom(f.name): f.name;
-      const node = await uploadStream(c.env, p, { parentId: parent.id, name, size: f.size, mime: f.type || undefined, overwrite }, f.stream());
+      const node = await uploadStream(c.env, p, { parentId: parent.id, parent, name, size: f.size, mime: f.type || undefined, overwrite }, f.stream());
       results.push({ node: publicNode(node), url: await fileLink(c.env, origin, node) });
     }
   } else {
     const name = c.req.query('name');
     const len = Number(c.req.header('Content-Length'));
     if (!name || !Number.isFinite(len)) throw new HttpError(400, 'raw upload needs ?name= and Content-Length');
-    const node = await uploadStream(c.env, p, { parentId: parent.id, name, size: len, mime: ct || undefined, overwrite }, c.req.raw.body!);
+    const node = await uploadStream(c.env, p, { parentId: parent.id, parent, name, size: len, mime: ct || undefined, overwrite }, c.req.raw.body!);
     results.push({ node: publicNode(node), url: await fileLink(c.env, origin, node) });
   }
   if (results.length === 0) throw new HttpError(400, 'no file');

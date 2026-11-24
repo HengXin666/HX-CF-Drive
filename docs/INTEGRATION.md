@@ -33,35 +33,37 @@ curl -X POST -H "Authorization: Bearer $ADMIN" -H "Content-Type: application/jso
 | POST | `/api/v1/fs/link` `{id, expiresIn}` | 签名直链, expiresIn 秒, 0 为永久 |
 | GET | `/api/v1/files/:id/content` | 读取内容, 支持 Range, `?download=1` |
 | POST | `/api/v1/upload?path=&rename=1` | 一次性上传 (multipart 字段 file, 或原始 body + `?name=`) |
-| POST | `/api/v1/uploads` | 分片上传: 初始化 |
-| PUT | `/api/v1/uploads/:id/:idx` | 分片上传: 传第 idx 片 |
-| GET | `/api/v1/uploads/:id` | 分片上传: 查已收分片 (续传) |
-| POST | `/api/v1/uploads/:id/complete` | 分片上传: 完成 |
-| DELETE | `/api/v1/uploads/:id` | 分片上传: 取消 |
+| POST | `/api/v1/uploads` | 分片上传: 初始化, 返回签名凭证 ticket |
+| PUT | `/api/v1/uploads/chunk?i=&ticket=` | 分片上传: 传第 i 片, 返回签名回执 receipt |
+| POST | `/api/v1/uploads/commit` `{ticket, receipts}` | 分片上传: 提交全部回执 |
 | POST/GET/DELETE | `/api/v1/shares` | 分享链接 |
 | GET | `/f/:id/:name?e=&s=` | 签名直链 (公开) |
 | GET | `/s/:id?p=密码&path=子路径` | 分享 (公开) |
-| * | `/api/v1/admin/*` | 管理: stats, bots, channels, tokens, maintenance, audit |
+| * | `/api/v1/admin/*` | 管理: stats, bots, channels, tokens, maintenance |
 
 错误统一返回 `{"error": "..."}`。429 和 503 带 `Retry-After` 头, 客户端按它等待后重试。
 
 ### 分片上传流程
 
+服务端不保存上传中间状态: 初始化返回一个 HMAC 签名的凭证, 每片返回一个签名回执, 最后把回执全部交回来。续传只要客户端留着回执 (`client.js` 存在 localStorage)。凭证 24 小时有效。
+
 ```bash
-# 1. 初始化。带 sha256 可以秒传
+# 1. 初始化。带 sha256 (客户端自己算) 可以秒传
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"path":"/video","name":"a.mp4","size":52428800,"sha256":"..."}' $BASE/api/v1/uploads
-# => {"done":false,"uploadId":"...","driver":"r2","chunkSize":16777216,"chunkCount":4}
-# 或 {"done":true,"node":{...},"url":"..."} 表示秒传成功
+# => {"done":false,"ticket":"...","chunkSize":19922944,"chunkCount":3}
+# 或 {"done":true,"node":{...}} 表示秒传成功
 
-# 2. 逐片上传, 每片恰好 chunkSize 字节 (最后一片除外)。可并发, 可重传
-curl -X PUT -H "Authorization: Bearer $TOKEN" --data-binary @part0 $BASE/api/v1/uploads/$UP/0
+# 2. 逐片上传, 每片恰好 chunkSize 字节 (最后一片除外)。可并发, 429 时按 Retry-After 重试
+curl -X PUT -H "Authorization: Bearer $TOKEN" --data-binary @part0 "$BASE/api/v1/uploads/chunk?i=0&ticket=$TICKET"
+# => {"receipt":"..."}
 
-# 3. 完成
-curl -X POST -H "Authorization: Bearer $TOKEN" $BASE/api/v1/uploads/$UP/complete
+# 3. 提交。缺片时返回 400 并列出缺的序号
+curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d "{\"ticket\":\"$TICKET\",\"receipts\":[\"...\",\"...\",\"...\"]}" $BASE/api/v1/uploads/commit
 ```
 
-可选参数: `backend` 指定 `r2` 或 `tg`, `overwrite` 覆盖同名文件, `mkdirs: false` 禁止自动建目录。
+可选参数: `overwrite` 覆盖同名文件, `mkdirs: false` 禁止自动建目录。单个请求体不能超过 100 MB (CF 免费计划), 所以超过 19 MiB 的文件必须走分片接口。
 
 ## 3. WebDAV
 
@@ -122,22 +124,20 @@ const BASE = 'https://drive.example.com', TOKEN = 'hxd_...';
 const H = { Authorization: `Bearer ${TOKEN}` };
 
 async function upload(file, path = '/') {
-  const init = await fetch(`${BASE}/api/v1/uploads`, {
-    method: 'POST', headers: { ...H, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path, name: file.name, size: file.size, mime: file.type }),
-  }).then((r) => r.json());
-  if (init.done) return init.url;
+  const post = (u, b) => fetch(BASE + u, { method: 'POST', headers: { ...H, 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then((r) => r.json());
+  const init = await post('/api/v1/uploads', { path, name: file.name, size: file.size, mime: file.type });
+  if (init.done) return init.node;
+  const receipts = [];
   for (let i = 0; i < init.chunkCount; i++) {
     const body = file.slice(i * init.chunkSize, (i + 1) * init.chunkSize);
     for (;;) {
-      const r = await fetch(`${BASE}/api/v1/uploads/${init.uploadId}/${i}`, { method: 'PUT', headers: H, body });
-      if (r.ok) break;
+      const r = await fetch(`${BASE}/api/v1/uploads/chunk?i=${i}&ticket=${encodeURIComponent(init.ticket)}`, { method: 'PUT', headers: H, body });
+      if (r.ok) { receipts.push((await r.json()).receipt); break; }
       if (r.status !== 429 && r.status !== 503) throw new Error(await r.text());
       await new Promise((s) => setTimeout(s, Number(r.headers.get('Retry-After') ?? 5) * 1000));
     }
   }
-  const done = await fetch(`${BASE}/api/v1/uploads/${init.uploadId}/complete`, { method: 'POST', headers: H }).then((r) => r.json());
-  return done.url;
+  return (await post('/api/v1/uploads/commit', { ticket: init.ticket, receipts })).node;
 }
 ```
 
@@ -149,3 +149,5 @@ async function upload(file, path = '/') {
 ```
 
 `/f/*` 已开启 CORS, 可以跨域加载。
+
+大文件 (冷读超过约 456 MB) 单次响应会被 206 截断, 浏览器直接点链接下载会只拿到第一段。网页里用 `public/client.js` 的 `downloadLarge`, 或用支持断点续传的下载器 (aria2, IDM)。播放器本身就按 Range 请求, 不受影响。

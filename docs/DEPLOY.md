@@ -1,6 +1,8 @@
 # 部署教程
 
-全程只用 Cloudflare 免费计划。需要 Node.js 18+ 和一个 Cloudflare 账号。
+全程只用 Cloudflare 免费计划, 只需要 Workers + D1, 不需要 R2 和 Durable Object, 不用绑定支付方式。需要 Node.js 18+ 和一个 Cloudflare 账号。
+
+> 条款提示: Cloudflare 自助服务条款要求非企业用户通过付费服务 (含 Developer Platform) 分发视频和大文件, 否则 CDN 可能被限制。大量放视频建议上 Workers Paid ($5/月)。
 
 ## 1. 安装与登录
 
@@ -14,9 +16,6 @@ npx wrangler login
 ```bash
 # D1 数据库, 把输出的 database_id 填进 wrangler.toml
 npx wrangler d1 create hx-cf-drive
-
-# R2 存储桶 (第一次用 R2 需要先在后台开通, 免费额度不需要付费, 但要绑定支付方式)
-npx wrangler r2 bucket create hx-cf-drive
 ```
 
 编辑 `wrangler.toml`:
@@ -27,8 +26,6 @@ binding = "DB"
 database_name = "hx-cf-drive"
 database_id = "这里换成上一步输出的 id"
 ```
-
-Durable Object 不需要手动创建, `wrangler deploy` 时按 `[[migrations]]` 自动建。免费计划只能用 SQLite 后端, 配置里已经是 `new_sqlite_classes`。
 
 ## 3. 建表
 
@@ -79,31 +76,21 @@ curl -H "Authorization: Bearer $ADMIN" $BASE/api/v1/admin/stats
 
 ## 7. 绑定自定义域名 (强烈建议)
 
-`*.workers.dev` 上 Cache API 不生效, 小图每次都会回源 TG。
+`*.workers.dev` 上 Cache API 不生效。只有设 `EDGE_CACHE=1` 时才用得上 (永久直链小文件写边缘缓存)。默认关闭, 靠 isolate 内存缓存 file_path 和清单。
 
 1. 域名托管到 Cloudflare。
 2. Workers 后台, 选中 `hx-cf-drive`, 设置, 域和路由, 添加自定义域, 例如 `drive.example.com`。
-
-## 8. R2 公开域名 (可选, 省 Worker 请求)
-
-视频走 R2 时, 给桶开一个公开自定义域名, 视频直链就完全不经过 Worker:
-
-1. R2 后台, 选中桶, 设置, 公开访问, 连接自定义域, 例如 `cdn.example.com`。
-2. `wrangler.toml` 里设 `R2_PUBLIC_BASE = "https://cdn.example.com"`, 重新部署。
-
-注意: 公开桶里的对象只靠随机 key 保护, 拿到链接的人都能访问, 且无法过期。私密视频不要开这个。
 
 ## 9. 常用配置
 
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
-| `CHUNK_SIZE` | 16777216 | 分片字节数, TG 最大 19 MB |
-| `MAX_CHUNKS_PER_RESPONSE` | 20 | 单次响应最多拼几片, Paid 计划可调到 200 |
-| `CHANNEL_RATE_PER_MIN` | 15 | 每频道每分钟发送上限 |
-| `ROUTE_VIDEO_TO` | r2 | 视频存哪, `r2` 或 `tg` |
-| `ROUTE_R2_MIN_BYTES` | 209715200 | 大于此值的文件走 R2 |
+| `CHUNK_SIZE` | 19922944 | 分片字节数, 超过 19 MiB 会被压回 19 MiB |
+| `SUBREQ_BUDGET` | 48 | 单次响应可用的外部子请求数。Free 上限 50, Paid 默认 10,000 |
+| `SEARCH_PER_MIN` | 6 | 每个令牌每分钟模糊搜索次数 |
 | `TRASH_DAYS` | 7 | 回收站保留天数 |
-| `R2_PUBLIC_BASE` | 空 | R2 公开域名 |
+| `EDGE_CACHE` | 0 | 1 = 永久直链小文件写入边缘缓存, 仅自定义域名有效 |
+| `D1_METER` | 空 | 1 = 响应头 `X-D1-Rows` 带本请求的 D1 查询数和行读写, 只在排查时开 |
 
 ## 10. 验证与监控
 
@@ -113,6 +100,9 @@ BASE=$BASE ADMIN=$ADMIN CHANNEL=-100xxxx node scripts/e2e.mjs
 
 # 实时日志, 关注 cpuTime 和 429
 npx wrangler tail
+
+# 实测每个操作的 D1 行读写 (需 D1_METER=1, 会建测试目录)
+BASE=$BASE ADMIN=$ADMIN node scripts/meter.mjs 200
 ```
 
 ## 11. 升级与回滚
@@ -131,4 +121,4 @@ npx wrangler rollback # 回滚到上一个版本
 npx wrangler d1 export hx-cf-drive --remote --output backup-$(date +%F).sql
 ```
 
-TG 频道里的分片和 R2 对象都按 blob id 命名, 只要 D1 备份在, 数据就能找回。
+TG 频道里的分片按 blob id 命名, 分片清单在 D1 的 blobs.manifest 里, 只要 D1 备份在, 数据就能找回。

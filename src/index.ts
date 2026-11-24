@@ -7,6 +7,7 @@ import { dav } from './routes/dav';
 import { pub } from './routes/public';
 import { runMaintenance } from './services/maintenance';
 import { setTgApiBase } from './drivers/tg';
+import { meterDb, meterHeader, type Meter } from './lib/d1meter';
 
 const app = new Hono<AppEnv>();
 
@@ -39,9 +40,15 @@ app.route('/', pub);
 app.all('*', (c) => c.env.ASSETS.fetch(c.req.raw));
 
 export default {
-  fetch(req: Request, env: Env, ctx: ExecutionContext) {
+  async fetch(req: Request, env: Env, ctx: ExecutionContext) {
     setTgApiBase(env.TG_API_BASE);
-    return app.fetch(req, env, ctx);
+    if (env.D1_METER !== '1') return app.fetch(req, env, ctx);
+    // 实测模式: 响应头带上本请求的 D1 用量
+    const m: Meter = { q: 0, r: 0, w: 0 };
+    const res = await app.fetch(req, { ...env, DB: meterDb(env.DB, m) }, ctx);
+    const out = new Response(res.body, res);
+    out.headers.set('X-D1-Rows', meterHeader(m));
+    return out;
   },
   async scheduled(_ev: ScheduledController, env: Env, ctx: ExecutionContext) {
     setTgApiBase(env.TG_API_BASE);

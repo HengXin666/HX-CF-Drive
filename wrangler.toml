@@ -16,14 +16,14 @@ database_name = "hx-cf-drive"
 database_id = "REPLACE_WITH_YOUR_D1_ID"
 migrations_dir = "migrations"
 
-# 每天 UTC 19:00 (北京时间凌晨 3 点): Bot 探活, 回收站清理
+# 每天 UTC 19:00 (北京时间凌晨 3 点): Bot 探活, 回收站清理, 删除孤儿分片
 [triggers]
 crons = ["0 19 * * *"]
 
 [vars]
 # 分片大小 (字节)。TG getFile 上限 20MB, 默认 19MiB, 超过会被自动压到 19MiB
 CHUNK_SIZE = "19922944"
-# 单次响应可用的外部子请求数。免费计划上限 50, 留 2 个余量; Paid 计划可调到 900
+# 单次响应可用的外部子请求数。免费计划上限 50, 留 2 个余量; Paid 计划默认 10,000, 可调到 2000 以上
 # 冷分片花 2 次 (getFile + 下载), 热分片 1 次
 SUBREQ_BUDGET = "48"
 # 每个令牌每分钟最多模糊搜索几次 (搜索会扫全表)

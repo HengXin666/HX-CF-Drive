@@ -17,9 +17,9 @@
 ## 2. 成熟方案的共同设计
 
 1. **元数据和文件分离**。所有项目都把目录树放在数据库 (D1, KV, PostgreSQL), TG 只当块存储。HX-CF-Drive 相同。
-2. **Bot API 分片 ≤ 20 MB**。ImgBed, Pentaract, tgState 都受 getFile 20 MB 限制切片。HX-CF-Drive 用 16 MB。
+2. **Bot API 分片 ≤ 20 MB**。ImgBed, Pentaract, tgState 都受 getFile 20 MB 限制切片。HX-CF-Drive v0.2 用 19 MiB。
 3. **真人账号换大文件和速度**。Teldrive 和 Telegram-Drive 用 MTProto, 单片可到 GB 级, 但要长连接服务器, 有封号风险。Workers 上做不了, 所以全 CF 方案只能走 Bot API。
-4. **多渠道负载均衡 + 失败切换**。ImgBed 支持多个 TG, R2, S3, Discord 渠道轮换, 上传失败自动换渠道。HX-CF-Drive 有 Bot 池 x 频道池, 但只有 TG 和 R2 两种。
+4. **多渠道负载均衡 + 失败切换**。ImgBed 支持多个 TG, R2, S3, Discord 渠道轮换, 上传失败自动换渠道。HX-CF-Drive 有 Bot 池 x 频道池, v0.2 起只用 TG。
 5. **挂载层单独做**。OpenList 不管存储, 只负责把各种后端挂成统一目录和 WebDAV。
 
 ## 3. 和 HX-CF-Drive 的对比
@@ -34,7 +34,7 @@
 | 细粒度 API 令牌 | 是 | 未核实 | 是 (含目录隔离) |
 | Web 管理界面 | 完整 | 完整 | 极简 |
 | 内容审核, AI 标签, 图片处理 | 是 | 否 | 否 |
-| 全局限速 (Durable Object) | 未核实 | 不适用 | 是 |
+| 全局限速 | 未核实 | 不适用 | v0.2 去掉 DO, 改为客户端按 429 重试 |
 | sha256 秒传 | 未核实 | 未核实 | 是 |
 | Bot 失效自动换 Bot 重新绑定 | 未核实 | 未核实 | 是 |
 | 社区与维护 | 6.9k star, 2026-11 仍在更新 | 3.2k star | 个人项目, 未上线验证 |

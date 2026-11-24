@@ -12,6 +12,8 @@ export interface Env {
   TRASH_DAYS: string;
   EDGE_CACHE?: string;
   TG_API_BASE?: string;
+  /** 本地实测: 响应头 X-D1-Rows */
+  D1_METER?: string;
 }
 
 /** 当前请求的身份 */

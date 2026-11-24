@@ -55,18 +55,18 @@ curl -X POST -H "Authorization: Bearer $ADMIN" -H "Content-Type: application/jso
 
 | 官方限制 | 来源 | 本项目的做法 |
 | --- | --- | --- |
-| sendDocument 最大 50 MB | Bot API 文档 | 固定 16 MB 分片 |
+| sendDocument 最大 50 MB | Bot API 文档 | 固定 19 MiB 分片 |
 | getFile 最大 20 MB | Bot API 文档 | 同上 |
 | file_path 至少有效 1 小时 | Bot API 文档 | 缓存 50 分钟 |
-| 群组内每分钟不超过 20 条 | Bot FAQ | 每频道默认 15 条/分 + 随机抖动, 全局 DO 统一调度 |
-| 429 带 retry_after | Bot API 文档 | 严格等待 retry_after x 1.2, 期间该 Bot 不再使用 |
+| 群组内每分钟不超过 20 条 | Bot FAQ | 不做服务端排队: TG 返回 429 时原样转给客户端, 客户端按 Retry-After 等待, 下次换 Bot |
+| 429 带 retry_after | Bot API 文档 | 该 Bot 在当前 isolate 内冷却 retry_after x 1.2, 期间不再选它 |
 | file_id 只对拿到它的 Bot 有效 | 实际行为 | 分片记录 bot_id; Bot 失效时用另一个 Bot 转发原消息拿新 file_id |
 
 其他做法:
 
 - 只用 `sendDocument` 并关闭类型识别, 防止被当成图片或视频压缩。
 - 分片文件名是随机 blob id, 不带原始文件名, 频道里看不出内容是什么。
-- 401/403 视为 Bot 失效, 标记 dead, 每小时探活一次, 恢复后自动启用。
+- 401/403 视为 Bot 失效, 标记 dead, 每天探活一次, 恢复后自动启用。
 
 ## 7. 扩容
 
@@ -79,7 +79,7 @@ curl -X POST -H "Authorization: Bearer $ADMIN" -H "Content-Type: application/jso
 | 现象 | 处理 |
 | --- | --- |
 | 添加频道时某个 Bot 显示 `NOT ADMIN` | 回频道把它加为管理员并勾选发布消息 |
-| 上传一直 429 | 看 `/api/v1/admin/stats` 里的 limiter.cooldown, 加 Bot 或频道, 或调低 `CHANNEL_RATE_PER_MIN` |
+| 上传一直 429 | 加 Bot 或频道; 客户端降低并发 (网页端默认 2 路) |
 | 某个 Bot 被封 | 不用处理。读取时自动换 Bot 重新绑定; 可以用 `DELETE /api/v1/admin/bots/:id` 下线 |
 | 存储小号被封 | 主号仍是管理员, 频道还在。新建小号, 主号把它加为管理员即可 |
-| 频道被删除 | 只有这种情况会丢数据。重要文件请同时保存在 R2, 或者用多个频道冗余 (后续版本) |
+| 频道被删除 | 只有这种情况会丢数据。重要文件请另存一份, 多频道冗余在后续版本 |

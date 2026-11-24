@@ -26,21 +26,86 @@ export async function childByName(env: Env, parentId: string, name: string): Pro
 
 export async function listChildren(env: Env, parentId: string): Promise<NodeRow[]> {
   const r = await env.DB.prepare(
-    'SELECT * FROM nodes WHERE parent_id = ? AND deleted_at IS NULL ORDER BY kind ASC, name COLLATE NOCASE ASC',
+    'SELECT * FROM nodes WHERE parent_id = ? AND deleted_at IS NULL',
 )
     .bind(parentId)
     .all<NodeRow>();
+  // 排序放在 JS 里做, SQL 不建临时 B 树, 少算一倍行读
+  return r.results.sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }): a.kind < b.kind ? -1 : 1));
+}
+
+const COLS = 'id, parent_id, name, kind, size, mime, blob_id, created_at, updated_at, deleted_at';
+const nCols = COLS.split(', ').map((x) => 'n.' + x).join(', ');
+
+/** 已知路径 (从 root 解析出来的节点), 省掉一次 pathOf */
+const knownPath = new WeakMap<NodeRow, string>();
+
+/** 一条递归 CTE 沿路径走到底, 返回 [根, 第 1 级, ...], 走不下去就提前结束。查询 1 次, 行读约等于深度 */
+export async function walkPath(env: Env, rootId: string, segs: string[]): Promise<NodeRow[]> {
+  const r = await env.DB.prepare(
+    // 段名用 json_extract 取标量, 这样能走 (parent_id, name) 唯一索引, 每级只读 1 行
+    `WITH RECURSIVE walk(depth, ${COLS}) AS (
+       SELECT 0, ${COLS} FROM nodes WHERE id = ?1 AND deleted_at IS NULL
+       UNION ALL
+       SELECT walk.depth + 1, ${nCols} FROM walk
+         JOIN nodes n ON n.parent_id = walk.id AND n.name = json_extract(?2, '$[' || walk.depth || ']') AND n.deleted_at IS NULL
+       WHERE walk.kind = 'dir' AND walk.depth < json_array_length(?2)
+     ) SELECT * FROM walk`,
+  )
+    .bind(rootId, JSON.stringify(segs))
+    .all<NodeRow & { depth: number }>();
   return r.results;
 }
 
 /** 按路径解析节点 (相对 principal 的根)。不存在返回 null */
 export async function resolvePath(env: Env, rootId: string, path: string): Promise<NodeRow | null> {
-  let cur = await getNode(env, rootId);
-  for (const seg of splitPath(path)) {
-    if (!cur || cur.kind !== 'dir') return null;
-    cur = await childByName(env, cur.id, seg);
+  const segs = splitPath(path);
+  const chain = await walkPath(env, rootId, segs);
+  if (chain.length !== segs.length + 1) return null;
+  const node = chain[chain.length - 1];
+  if (rootId === 'root') knownPath.set(node, '/' + segs.join('/'));
+  return node;
+}
+
+/** 有现成路径就直接用, 否则查一次 */
+export async function pathFor(env: Env, node: NodeRow): Promise<string> {
+  return knownPath.get(node) ?? pathOf(env, node.id);
+}
+
+/**
+ * 批量求路径: 从这些节点的父目录往上走, UNION 去重, 同一目录只读一次。
+ * 返回 id -> { path, ancestors }, ancestors 含自身。
+ */
+export async function pathsOf(env: Env, nodes: NodeRow[]): Promise<Map<string, { path: string; ancestors: Set<string> }>> {
+  const out = new Map<string, { path: string; ancestors: Set<string> }>();
+  if (nodes.length === 0) return out;
+  const starts = [...new Set(nodes.map((n) => n.parent_id).filter((x): x is string => !!x))];
+  const dirs = new Map<string, { parent: string | null; name: string }>();
+  if (starts.length) {
+    const r = await env.DB.prepare(
+      `WITH RECURSIVE anc(id) AS (
+         SELECT value FROM json_each(?)
+         UNION
+         SELECT n.parent_id FROM nodes n JOIN anc ON n.id = anc.id WHERE n.parent_id IS NOT NULL
+       ) SELECT n.id, n.parent_id, n.name FROM anc JOIN nodes n ON n.id = anc.id`,
+    )
+      .bind(JSON.stringify(starts))
+      .all<{ id: string; parent_id: string | null; name: string }>();
+    for (const d of r.results) dirs.set(d.id, { parent: d.parent_id, name: d.name });
   }
-  return cur;
+  for (const n of nodes) {
+    const names = [n.name];
+    const ancestors = new Set([n.id]);
+    for (let cur = n.parent_id, guard = 0; cur && guard < 64; guard++) {
+      ancestors.add(cur);
+      const d = dirs.get(cur);
+      if (!d) break;
+      if (d.name) names.push(d.name);
+      cur = d.parent;
+    }
+    out.set(n.id, { path: '/' + names.filter(Boolean).reverse().join('/'), ancestors });
+  }
+  return out;
 }
 
 /** 节点是否位于 ancestorId 之下 (含自身)。用递归 CTE 一次查完 */
@@ -96,11 +161,35 @@ export async function mkdir(env: Env, parentId: string, name: string): Promise<N
   return row;
 }
 
-/** mkdir -p: 按路径逐级创建 */
+/** mkdir -p: 一次查询找到已存在的最深一级, 缺的目录一个 batch 建完 */
 export async function mkdirp(env: Env, rootId: string, path: string): Promise<NodeRow> {
-  let cur = await getNode(env, rootId);
-  if (!cur) throw new HttpError(404, 'root not found');
-  for (const seg of splitPath(path)) cur = await mkdir(env, cur.id, seg);
+  const segs = splitPath(path);
+  for (const seg of segs) if (!validName(seg)) throw new HttpError(400, 'invalid name');
+  const chain = await walkPath(env, rootId, segs);
+  if (chain.length === 0) throw new HttpError(404, 'root not found');
+  let cur = chain[chain.length - 1];
+  if (cur.kind !== 'dir') throw new HttpError(409, 'a file with that name exists');
+  const rest = segs.slice(chain.length - 1);
+  if (rest.length === 0) return cur;
+  const t = now();
+  const stmts: D1PreparedStatement[] = [];
+  for (const name of rest) {
+    const row: NodeRow = {
+      id: newId(), parent_id: cur.id, name, kind: 'dir', size: 0, mime: null, blob_id: null,
+      created_at: t, updated_at: t, deleted_at: null,
+    };
+    stmts.push(env.DB.prepare('INSERT INTO nodes (id, parent_id, name, kind, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').bind(row.id, row.parent_id, name, 'dir', t, t));
+    cur = row;
+  }
+  try {
+    await env.DB.batch(stmts);
+  } catch (e) {
+    // 并发建了同名目录 (唯一索引冲突): 重新走一遍, 走得通就用现成的
+    const again = await resolvePath(env, rootId, path);
+    if (again?.kind === 'dir') return again;
+    if (again) throw new HttpError(409, 'a file with that name exists');
+    throw e;
+  }
   return cur;
 }
 

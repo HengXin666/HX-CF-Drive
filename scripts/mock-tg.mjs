@@ -16,7 +16,7 @@ async function readBody(req) { const parts = []; for await (const p of req) part
 
 http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
-  const m = /^\/bot(\d+):([^/]+)\/(\w+)$/.exec(url.pathname);
+  const m = /^\/bot(\d+):[^/]+\/(\w+)$/.exec(url.pathname);
   const f = /^\/file\/bot(\d+):[^/]+\/(.+)$/.exec(url.pathname);
   if (f) {
     const [, botId, path] = f;

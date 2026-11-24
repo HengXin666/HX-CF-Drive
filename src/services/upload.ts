@@ -27,6 +27,8 @@ interface Receipt extends ChunkRef { id: string; i: number }
 
 export interface InitInput {
   parentId: string;
+  /** 调用方已解析并校验过权限的父目录, 传了就省两次查询 */
+  parent?: NodeRow;
   name: string;
   size: number;
   mime?: string;
@@ -53,9 +55,9 @@ export function expectedChunkSize(size: number, chunkSize: number, idx: number):
 export async function initUpload(env: Env, p: Principal, inp: InitInput): Promise<InitResult> {
   if (!validName(inp.name)) throw new HttpError(400, 'invalid name');
   if (!Number.isInteger(inp.size) || inp.size <= 0) throw new HttpError(400, 'invalid size (empty files are not supported)');
-  const parent = await getNode(env, inp.parentId);
+  const parent = inp.parent ?? (await getNode(env, inp.parentId));
   if (!parent || parent.kind !== 'dir') throw new HttpError(404, 'parent not found');
-  await assertAccess(env, p, parent.id);
+  if (!inp.parent) await assertAccess(env, p, parent.id);
   const existing = await childByName(env, parent.id, inp.name);
   if (existing && (existing.kind === 'dir' || !inp.overwrite)) throw new HttpError(409, 'target exists');
 

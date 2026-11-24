@@ -16,16 +16,16 @@
 - 定时任务每天一次; 静态前端直接由 Assets 返回, 不进 Worker。
 - CPU: 下载由 FixedLengthStream 原生搬运; 上传不再 `arrayBuffer()`, multipart 头尾 + 请求体原生管道拼接; 服务端不算哈希。
 - 接入: REST API, WebDAV (rclone, RaiDrive, Finder, Infuse, OpenList), PicGo, ShareX, 受限 API 令牌。
-- 运维: 定时任务每 15 分钟做 Bot 探活, 清理过期上传, 回收站清理, 删除频道消息。
+- 运维: 定时任务每天一次: Bot 探活, 回收站清理, 删除无引用分片的频道消息。
 
 ## 架构
 
 ```
 REST    /api/v1  ─┐
 WebDAV  /dav     ─┤           ┌─ D1   目录树与元数据
-直链    /f/:id   ─┼─ Worker ──┼─ R2   视频与大文件 (multipart)
-分享    /s/:id   ─┘  (Hono)   ├─ DO   ChannelLimiter 频道节拍与 Bot 冷却
-                              └─ TG   Bot API 私有频道 16 MB 分片
+直链    /f/:id   ─┼─ Worker ──┤        (分片清单一行 JSON)
+分享    /s/:id   ─┘  (Hono)   └─ TG   Bot API 私有频道 19 MiB 分片
+静态前端 public/  由 Assets 直接返回, 不进 Worker
 ```
 
 ## 目录结构
@@ -34,19 +34,19 @@ WebDAV  /dav     ─┤           ┌─ D1   目录树与元数据
 src/
   index.ts                   入口, 路由挂载, 定时任务
   env.ts                     绑定与类型
-  do/limiter.ts              全局限速 Durable Object
   drivers/tg.ts              Telegram 驱动 (上传, 下载, Bot 池, 重新绑定)
-  drivers/r2.ts              R2 驱动 (单块与 multipart)
-  lib/                       鉴权, 目录树, Range, 签名, 路由策略, 工具函数
+  lib/                       鉴权, 目录树, Range, 签名, D1 计量, 工具函数
   routes/api.ts              REST API
   routes/dav.ts              WebDAV
   routes/public.ts           签名直链与分享
-  services/upload.ts         分片上传流程
+  services/upload.ts         无状态分片上传 (签名凭证 + 回执)
   services/serve.ts          读取与流式拼接
   services/maintenance.ts    定时维护
 migrations/                  D1 表结构
 public/index.html            极简 Web 界面
-scripts/quota.mjs            免费额度估算
+public/client.js             浏览器端 sha256, 断点续传, 大文件 Range 续拉
+scripts/quota.mjs            免费额度估算 (按实测单次行数)
+scripts/meter.mjs            实测每个操作的 D1 行读写
 scripts/mock-tg.mjs          本地模拟 Telegram
 scripts/e2e.mjs              端到端冒烟测试
 test/                        单元测试
@@ -79,8 +79,11 @@ node scripts/e2e.mjs # 端到端冒烟
 
 ## 已知限制
 
-- Telegram 单分片 ≤ 20 MB (getFile 上限), 因此固定 16 MB 分片。
-- 免费计划单次调用最多 50 个子请求, TG 文件单次响应最多拼 20 片 (320 MB), 超出部分用 206 分段返回。不带 Range 的客户端 (如 curl 直接下大文件) 只能拿到前 320 MB, 请用支持 Range 的下载器。
+- Telegram 单分片 ≤ 20 MB (getFile 上限), 因此固定 19 MiB 分片。
+- 免费计划单次调用最多 50 个外部子请求。冷分片要 2 次 (getFile + 下载), 热分片 1 次, 所以单次响应冷拼 24 片 (约 456 MB), 热拼 48 片, 超出部分 206 截断。不带 Range 的客户端 (如 curl 直接下大文件) 只能拿到第一段; 网页端 `client.js` 和播放器会自动用 Range 续拉。Paid 计划上限 10,000, 把 `SUBREQ_BUDGET` 调大即可。
 - Cache API 在 `*.workers.dev` 上不生效, 边缘缓存需要绑定自定义域名。
-- 搜索用 `LIKE '%q%'`, 会扫全表, 文件很多时是 D1 读行的主要来源。
+- 搜索用 `LIKE '%q%'`, 未命中时扫全表, 是 D1 读行的主要来源, 已按令牌限频。
 - WebDAV 的 LOCK 是假锁, 只为兼容 Windows 和 Finder。
+- 不支持空文件 (0 字节)。
+- 同一分片被并发重传时, TG 里可能多出一条无引用消息, 只占频道空间, 不影响读取。
+- 上传路径的 CPU 时间尚未在线上实测, 部署后用 `wrangler tail` 看 `cpuTime`。
