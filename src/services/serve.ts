@@ -71,6 +71,8 @@ export async function serveNode(env: Env, node: NodeRow, req: Request, opt: Serv
   };
   // 304 与 HEAD 都不需要读 blob
   if (req.headers.get('If-None-Match') === etag) return new Response(null, { status: 304, headers: base });
+  // 空文件: 不碰 blob 和 TG, Range 一律忽略
+  if (node.size === 0) return new Response(req.method === 'HEAD' ? null : '', { status: 200, headers: { ...base, 'Content-Length': '0' } });
 
   let range: ByteRange | null;
   try {

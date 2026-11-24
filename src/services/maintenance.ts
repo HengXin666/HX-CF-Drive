@@ -33,20 +33,23 @@ export async function runMaintenance(env: Env): Promise<Record<string, number>> 
   }
   if (out.revived) invalidateBotCache();
 
-  // 2. 回收站超期
+  // 2. 回收站超期。删除目录时只标记了顶层, 清理到目录时给直接子项标上同样的时间戳,
+  //    同一轮里继续往下清, 每轮最多 200 个节点, 清不完下次接着来
   const cutoff = now() - num(env.TRASH_DAYS, 7) * 86400_000;
-  const expired = await env.DB.prepare('SELECT id, blob_id FROM nodes WHERE deleted_at IS NOT NULL AND deleted_at < ? LIMIT 200')
-    .bind(cutoff)
-    .all<{ id: string; blob_id: string | null }>();
-  if (expired.results.length) {
+  for (let pass = 0; pass < 8 && out.nodes < 200; pass++) {
+    const expired = await env.DB.prepare('SELECT id, kind, blob_id, deleted_at FROM nodes WHERE deleted_at IS NOT NULL AND deleted_at < ? LIMIT ?')
+      .bind(cutoff, 200 - out.nodes)
+      .all<{ id: string; kind: string; blob_id: string | null; deleted_at: number }>();
+    if (!expired.results.length) break;
     const stmts = [];
     for (const n of expired.results) {
+      if (n.kind === 'dir') stmts.push(env.DB.prepare('UPDATE nodes SET deleted_at = ? WHERE parent_id = ? AND deleted_at IS NULL').bind(n.deleted_at, n.id));
       if (n.blob_id) stmts.push(env.DB.prepare('UPDATE blobs SET ref_count = ref_count - 1 WHERE id = ?').bind(n.blob_id));
       stmts.push(env.DB.prepare('DELETE FROM shares WHERE node_id = ?').bind(n.id));
       stmts.push(env.DB.prepare('DELETE FROM nodes WHERE id = ?').bind(n.id));
     }
     await env.DB.batch(stmts);
-    out.nodes = expired.results.length;
+    out.nodes += expired.results.length;
   }
 
   // 3. 清理引用归零的 blob

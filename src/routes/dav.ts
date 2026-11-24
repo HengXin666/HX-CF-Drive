@@ -107,12 +107,11 @@ dav.put('/*', requireScope('write'), async (c) => {
   const { parent, name } = parentAndName(rel(c));
   const dir = await resolvePath(c.env, p.rootId, parent);
   if (!dir || dir.kind !== 'dir') return c.body(null, 409);
-  await assertAccess(c.env, p, dir.id);
   const len = Number(c.req.header('Content-Length') ?? NaN);
   if (!Number.isFinite(len)) return c.body('Content-Length required (chunked PUT not supported)', 411);
   const existed = !!(await childByName(c.env, dir.id, name));
   const body = c.req.raw.body ?? new ReadableStream({ start: (ctl) => ctl.close() });
-  await uploadStream(c.env, p, { parentId: dir.id, name, size: len, mime: c.req.header('Content-Type') || undefined, overwrite: true }, body);
+  await uploadStream(c.env, p, { parentId: dir.id, parent: dir, name, size: len, mime: c.req.header('Content-Type') || undefined, overwrite: true }, body);
   return c.body(null, existed ? 204 : 201);
 });
 

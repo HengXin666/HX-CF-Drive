@@ -7,7 +7,8 @@ const ADMIN = process.env.ADMIN ?? 'test-admin';
 const CHANNEL = process.env.CHANNEL ?? '-1001234567890';
 const H = { Authorization: `Bearer ${ADMIN}` };
 let pass = 0;
-const P = `/e2e-${Date.now()}`; // 每次运行独立目录
+const RUN = Date.now();
+const P = `/e2e-${RUN}`; // 每次运行独立目录
 const ok = (cond, msg) => { if (!cond) { console.error('✗', msg); process.exit(1); } pass++; console.log('✓', msg); };
 const j = async (method, path, body, headers = {}) => {
   const r = await fetch(BASE + path, { method, headers: { ...H, 'Content-Type': 'application/json', ...headers }, body: body ? JSON.stringify(body): undefined });
@@ -85,20 +86,36 @@ ok((await j('POST', '/api/v1/uploads/commit', { ticket: t2.body.ticket, receipts
 // 目录, 移动, 搜索, 回收站
 const ls = await j('GET', `/api/v1/fs/list?path=${P}/files`);
 ok(ls.body.children.length === 2, '列目录');
-await j('POST', '/api/v1/fs/move', { path: `${P}/files/big-copy.bin`, toPath: `${P}/img`, name: 'moved.bin' });
-ok((await j('GET', `/api/v1/fs/stat?path=${P}/img/moved.bin`)).status === 200, '移动+重命名');
-ok((await j('GET', '/api/v1/fs/search?q=moved')).body.items.length === 1, '搜索');
+await j('POST', '/api/v1/fs/move', { path: `${P}/files/big-copy.bin`, toPath: `${P}/img`, name: `mv${RUN}.bin` });
+ok((await j('GET', `/api/v1/fs/stat?path=${P}/img/mv${RUN}.bin`)).status === 200, '移动+重命名');
+ok((await j('GET', `/api/v1/fs/search?q=mv${RUN}`)).body.items.length === 1, '搜索');
 await j('POST', '/api/v1/fs/delete', { path: `${P}/img` });
 ok((await j('GET', `/api/v1/fs/stat?path=${P}/img/a.png`)).status === 404, '删除目录');
 const trash = await j('GET', '/api/v1/fs/trash');
 await j('POST', '/api/v1/fs/restore', { id: trash.body.items[0].id });
 ok((await j('GET', `/api/v1/fs/stat?path=${P}/img/a.png`)).status === 200, '回收站恢复 (含子项) ');
 
+// 删除目录只标记顶层: 子项按 ID 不可见, 搜索不到, 恢复后回来
+const sub = await chunkUpload(`${P}/del/a/b`, `deep${RUN}.bin`, rand(1000), 'application/octet-stream');
+await j('POST', '/api/v1/fs/delete', { path: `${P}/del` });
+ok((await fetch(`${BASE}/api/v1/files/${sub.node.id}/content`, { headers: H })).status === 404, '已删目录下的文件按 ID 404');
+ok((await j('GET', `/api/v1/fs/search?q=deep${RUN}`)).body.items.length === 0, '已删目录下的文件搜不到');
+const tr2 = (await j('GET', '/api/v1/fs/trash')).body.items.find((x) => x.name === 'del');
+await j('POST', '/api/v1/fs/restore', { id: tr2.id });
+ok((await fetch(`${BASE}/api/v1/files/${sub.node.id}/content`, { headers: H })).status === 200, '恢复目录后子项回来');
+
+// 空文件
+const em = await j('POST', '/api/v1/uploads', { path: `${P}/empty`, name: 'e.txt', size: 0 });
+ok(em.body.done === true, '空文件直接完成');
+const er = await fetch(`${BASE}/api/v1/files/${em.body.node.id}/content`, { headers: H });
+ok(er.status === 200 && (await er.arrayBuffer()).byteLength === 0, '空文件读取');
+
 // WebDAV
 const dav = (m, p, body, h = {}) => fetch(BASE + '/dav' + p, { method: m, headers: { Authorization: 'Basic ' + Buffer.from('u:' + ADMIN).toString('base64'), ...h }, body });
 ok((await dav('MKCOL', `${P}-dav`)).status === 201, 'WebDAV MKCOL');
 const txt = Buffer.from('hello webdav 你好');
 ok((await dav('PUT', `${P}-dav/x.txt`, txt, { 'Content-Length': String(txt.length) })).status === 201, 'WebDAV PUT');
+ok((await dav('PUT', `${P}-dav/zero.txt`, Buffer.alloc(0), { 'Content-Length': '0' })).status === 201, 'WebDAV PUT 空文件');
 const pf = await (await dav('PROPFIND', `${P}-dav`, null, { Depth: '1' })).text();
 ok(pf.includes('x.txt'), 'WebDAV PROPFIND');
 ok((await dav('MOVE', `${P}-dav/x.txt`, null, { Destination: BASE + `/dav${P}-dav/y.txt` })).status === 201, 'WebDAV MOVE');

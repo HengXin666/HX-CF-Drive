@@ -2,21 +2,15 @@
 import { Hono } from 'hono';
 import type { AppEnv, Env } from '../env';
 import { verifyLink } from '../lib/sign';
-import { getNode, listChildren, type NodeRow, publicNode, resolvePath } from '../lib/tree';
+import { getNode, getNodeCached, listChildren, type NodeRow, publicNode, resolvePath } from '../lib/tree';
 import { HttpError, sha256Hex } from '../lib/util';
 import { serveNode } from '../services/serve';
 
 export const pub = new Hono<AppEnv>();
 
-/** 签名直链的节点缓存 60 秒: 热门图片反复访问时 D1 零读 */
-const nodeCache = new Map<string, { at: number; n: NodeRow }>();
 async function cachedNode(env: Env, id: string): Promise<NodeRow> {
-  const hit = nodeCache.get(id);
-  if (hit && Date.now() - hit.at < 60_000) return hit.n;
-  const n = await getNode(env, id);
+  const n = await getNodeCached(env, id);
   if (!n) throw new HttpError(404, 'not found');
-  if (nodeCache.size > 5000) nodeCache.clear();
-  nodeCache.set(id, { at: Date.now(), n });
   return n;
 }
 

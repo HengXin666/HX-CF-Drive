@@ -14,8 +14,43 @@ export interface NodeRow {
   deleted_at: number | null;
 }
 
+/**
+ * 按 ID 取节点, 要求自身和所有祖先都没被删除 (删除目录只标记顶层)。
+ * 一条递归 CTE 向上走, 遇到已删除的祖先就停, 行读约等于深度。
+ * 走到顶的节点 parent_id 必须为空 (即 root), 否则说明中间某级已被清理。
+ */
 export async function getNode(env: Env, id: string): Promise<NodeRow | null> {
-  return env.DB.prepare('SELECT * FROM nodes WHERE id = ? AND deleted_at IS NULL').bind(id).first<NodeRow>();
+  if (id === 'root') return env.DB.prepare('SELECT * FROM nodes WHERE id = ? AND deleted_at IS NULL').bind(id).first<NodeRow>();
+  // 只扫一遍祖先链, 判断放在 JS 里做 (CTE 被子查询引用多次会重复计算, 行读翻好几倍)
+  const r = await env.DB.prepare(
+    `WITH RECURSIVE up(depth, ${COLS}) AS (
+       SELECT 0, ${COLS} FROM nodes WHERE id = ?
+       UNION ALL
+       SELECT up.depth + 1, ${nCols} FROM nodes n JOIN up ON n.id = up.parent_id
+       WHERE up.deleted_at IS NULL AND up.depth < 64
+     ) SELECT * FROM up`,
+  )
+    .bind(id)
+    .all<NodeRow & { depth: number }>();
+  const chain = r.results;
+  if (!chain.length || chain.some((x) => x.deleted_at !== null) || chain[chain.length - 1].parent_id !== null) return null;
+  const { depth: _d, ...node } = chain[0];
+  return node;
+}
+
+/** 读路径用的节点缓存 60 秒: 播放器反复 Range, 热门图片反复访问时 D1 零读。本 isolate 内删除或移动会立即失效 */
+const nodeCache = new Map<string, { at: number; n: NodeRow }>();
+export async function getNodeCached(env: Env, id: string): Promise<NodeRow | null> {
+  const hit = nodeCache.get(id);
+  if (hit && Date.now() - hit.at < 60_000) return hit.n;
+  const n = await getNode(env, id);
+  if (!n) return null;
+  if (nodeCache.size > 5000) nodeCache.clear();
+  nodeCache.set(id, { at: Date.now(), n });
+  return n;
+}
+export function forgetNode(id: string): void {
+  nodeCache.delete(id);
 }
 
 export async function childByName(env: Env, parentId: string, name: string): Promise<NodeRow | null> {
@@ -76,34 +111,36 @@ export async function pathFor(env: Env, node: NodeRow): Promise<string> {
  * 批量求路径: 从这些节点的父目录往上走, UNION 去重, 同一目录只读一次。
  * 返回 id -> { path, ancestors }, ancestors 含自身。
  */
-export async function pathsOf(env: Env, nodes: NodeRow[]): Promise<Map<string, { path: string; ancestors: Set<string> }>> {
-  const out = new Map<string, { path: string; ancestors: Set<string> }>();
+export async function pathsOf(env: Env, nodes: NodeRow[]): Promise<Map<string, { path: string; ancestors: Set<string>; dead: boolean }>> {
+  const out = new Map<string, { path: string; ancestors: Set<string>; dead: boolean }>();
   if (nodes.length === 0) return out;
   const starts = [...new Set(nodes.map((n) => n.parent_id).filter((x): x is string => !!x))];
-  const dirs = new Map<string, { parent: string | null; name: string }>();
+  const dirs = new Map<string, { parent: string | null; name: string; deleted: boolean }>();
   if (starts.length) {
     const r = await env.DB.prepare(
       `WITH RECURSIVE anc(id) AS (
          SELECT value FROM json_each(?)
          UNION
          SELECT n.parent_id FROM nodes n JOIN anc ON n.id = anc.id WHERE n.parent_id IS NOT NULL
-       ) SELECT n.id, n.parent_id, n.name FROM anc JOIN nodes n ON n.id = anc.id`,
+       ) SELECT n.id, n.parent_id, n.name, n.deleted_at FROM anc JOIN nodes n ON n.id = anc.id`,
     )
       .bind(JSON.stringify(starts))
-      .all<{ id: string; parent_id: string | null; name: string }>();
-    for (const d of r.results) dirs.set(d.id, { parent: d.parent_id, name: d.name });
+      .all<{ id: string; parent_id: string | null; name: string; deleted_at: number | null }>();
+    for (const d of r.results) dirs.set(d.id, { parent: d.parent_id, name: d.name, deleted: d.deleted_at !== null });
   }
   for (const n of nodes) {
     const names = [n.name];
     const ancestors = new Set([n.id]);
+    let dead = false;
     for (let cur = n.parent_id, guard = 0; cur && guard < 64; guard++) {
       ancestors.add(cur);
       const d = dirs.get(cur);
-      if (!d) break;
+      // 祖先已删除或已被清理 (断链): 这个节点不可见
+      if (!d || d.deleted) { dead = true; break; }
       if (d.name) names.push(d.name);
       cur = d.parent;
     }
-    out.set(n.id, { path: '/' + names.filter(Boolean).reverse().join('/'), ancestors });
+    out.set(n.id, { path: '/' + names.filter(Boolean).reverse().join('/'), ancestors, dead });
   }
   return out;
 }
@@ -207,46 +244,29 @@ export async function moveNode(env: Env, id: string, newParentId: string, newNam
     if (!overwrite) throw new HttpError(409, 'target exists');
     await trashNode(env, clash.id);
   }
+  forgetNode(id);
   await env.DB.prepare('UPDATE nodes SET parent_id = ?, name = ?, updated_at = ? WHERE id = ?')
     .bind(newParentId, newName, now(), id)
     .run();
 }
 
-/** 放进回收站: 目录连同子孙一起标记 */
+/** 放进回收站: 只标记这一个节点, 子孙因祖先已删除而不可见。写入 O(1) */
 export async function trashNode(env: Env, id: string): Promise<number> {
   if (id === 'root') throw new HttpError(400, 'cannot delete root');
-  const t = now();
-  const r = await env.DB.prepare(
-    `WITH RECURSIVE sub(id) AS (
-       SELECT id FROM nodes WHERE id = ?
-       UNION ALL
-       SELECT n.id FROM nodes n JOIN sub ON n.parent_id = sub.id WHERE n.deleted_at IS NULL
-) UPDATE nodes SET deleted_at = ? WHERE id IN (SELECT id FROM sub) AND deleted_at IS NULL`,
-)
-    .bind(id, t)
-    .run();
+  forgetNode(id);
+  const r = await env.DB.prepare('UPDATE nodes SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL').bind(now(), id).run();
   return r.meta.changes ?? 0;
 }
 
-/** 从回收站恢复 (只恢复同一次删除的子树); 若原位置重名则加后缀 */
+/** 从回收站恢复: 子孙本来就没动, 只清顶层标记; 原位置重名则加后缀, 原父目录不在了就放回根 */
 export async function restoreNode(env: Env, id: string): Promise<void> {
   const node = await env.DB.prepare('SELECT * FROM nodes WHERE id = ?').bind(id).first<NodeRow>();
   if (!node || !node.deleted_at) throw new HttpError(404, 'not in trash');
-  const parent = node.parent_id ? await getNode(env, node.parent_id): null;
+  const parent = node.parent_id ? await getNode(env, node.parent_id) : null;
   const parentId = parent ? parent.id : 'root';
   let name = node.name;
   if (await childByName(env, parentId, name)) name = `${name} (restored ${new Date().toISOString().slice(0, 19)})`;
-  const stamp = node.deleted_at;
-  await env.DB.batch([
-    env.DB.prepare('UPDATE nodes SET parent_id = ?, name = ?, deleted_at = NULL WHERE id = ?').bind(parentId, name, id),
-    env.DB.prepare(
-      `WITH RECURSIVE sub(id) AS (
-         SELECT id FROM nodes WHERE parent_id = ?
-         UNION ALL
-         SELECT n.id FROM nodes n JOIN sub ON n.parent_id = sub.id
-) UPDATE nodes SET deleted_at = NULL WHERE id IN (SELECT id FROM sub) AND deleted_at = ?`,
-).bind(id, stamp),
-  ]);
+  await env.DB.prepare('UPDATE nodes SET parent_id = ?, name = ?, deleted_at = NULL WHERE id = ?').bind(parentId, name, id).run();
 }
 
 export function publicNode(n: NodeRow) {

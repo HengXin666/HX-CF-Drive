@@ -6,7 +6,7 @@ import { activeChannels, allBots, invalidateBotCache, invalidateChannelCache, tg
 import { requireScope } from '../lib/auth';
 import { signLink } from '../lib/sign';
 import {
-  assertAccess, getNode, isWithin, listChildren, mkdirp, moveNode, type NodeRow, pathFor, pathOf, pathsOf, publicNode, resolvePath, restoreNode, trashNode,
+  assertAccess, getNode, getNodeCached, isWithin, listChildren, mkdirp, moveNode, type NodeRow, pathFor, pathOf, pathsOf, publicNode, resolvePath, restoreNode, trashNode,
 } from '../lib/tree';
 import { HttpError, newId, now, sha256Hex } from '../lib/util';
 import { runMaintenance } from '../services/maintenance';
@@ -144,7 +144,7 @@ api.get('/fs/search', requireScope('read'), async (c) => {
   for (const n of r.results) {
     if (items.length >= limit) break;
     const e = paths.get(n.id);
-    if (!e || (p.rootId !== 'root' && !e.ancestors.has(p.rootId))) continue;
+    if (!e || e.dead || (p.rootId !== 'root' && !e.ancestors.has(p.rootId))) continue;
     items.push({ ...publicNode(n), path: e.path });
   }
   return c.json({ items });
@@ -160,7 +160,9 @@ api.post('/fs/link', requireScope('read'), async (c) => {
 // ---------------- 读取内容 ----------------
 
 api.on(['GET', 'HEAD'], '/files/:id/content', requireScope('read'), async (c) => {
-  const node = await locate(c, c.req.param('id'));
+  const node = await getNodeCached(c.env, c.req.param('id')!);
+  if (!node) throw new HttpError(404, 'not found');
+  await assertAccess(c.env, c.get('principal'), node.id);
   return serveNode(c.env, node, c.req.raw, { download: c.req.query('download') === '1', waitUntil: (p) => c.executionCtx.waitUntil(p) });
 });
 
@@ -222,7 +224,7 @@ api.post('/upload', requireScope('write'), async (c) => {
     const name = c.req.query('name');
     const len = Number(c.req.header('Content-Length'));
     if (!name || !Number.isFinite(len)) throw new HttpError(400, 'raw upload needs ?name= and Content-Length');
-    const node = await uploadStream(c.env, p, { parentId: parent.id, parent, name, size: len, mime: ct || undefined, overwrite }, c.req.raw.body!);
+    const node = await uploadStream(c.env, p, { parentId: parent.id, parent, name, size: len, mime: ct || undefined, overwrite }, c.req.raw.body ?? new ReadableStream({ start: (ctl) => ctl.close() }));
     results.push({ node: publicNode(node), url: await fileLink(c.env, origin, node) });
   }
   if (results.length === 0) throw new HttpError(400, 'no file');

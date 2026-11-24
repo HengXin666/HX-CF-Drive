@@ -54,7 +54,7 @@ export function expectedChunkSize(size: number, chunkSize: number, idx: number):
 
 export async function initUpload(env: Env, p: Principal, inp: InitInput): Promise<InitResult> {
   if (!validName(inp.name)) throw new HttpError(400, 'invalid name');
-  if (!Number.isInteger(inp.size) || inp.size <= 0) throw new HttpError(400, 'invalid size (empty files are not supported)');
+  if (!Number.isInteger(inp.size) || inp.size < 0) throw new HttpError(400, 'invalid size');
   const parent = inp.parent ?? (await getNode(env, inp.parentId));
   if (!parent || parent.kind !== 'dir') throw new HttpError(404, 'parent not found');
   if (!inp.parent) await assertAccess(env, p, parent.id);
@@ -65,6 +65,12 @@ export async function initUpload(env: Env, p: Principal, inp: InitInput): Promis
   const sha = inp.sha256 && /^[0-9a-f]{64}$/i.test(inp.sha256) ? inp.sha256.toLowerCase(): null;
 
   // 秒传: 同哈希同大小的 blob 已存在就直接引用 (走唯一索引, 读 1 行)
+  // 空文件: 所有空文件共用一个清单为空的 blob, 不发 TG
+  if (inp.size === 0) {
+    await env.DB.prepare("INSERT OR IGNORE INTO blobs (id, size, sha256, chunk_size, manifest, ref_count, created_at) VALUES ('empty', 0, NULL, 0, '[]', 0, ?)").bind(now()).run();
+    return { done: true, node: await linkNode(env, parent.id, inp.name, 0, mime, 'empty', existing) };
+  }
+
   if (sha) {
     const blob = await env.DB.prepare('SELECT id FROM blobs WHERE sha256 = ? AND size = ?').bind(sha, inp.size).first<{ id: string }>();
     if (blob) {
