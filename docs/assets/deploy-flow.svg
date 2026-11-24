@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="484" viewBox="0 0 960 484" role="img" aria-label="GitHub Actions 部署流程">
+<title>GitHub Actions 部署流程</title>
+<style>text{font-family:-apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;} .m{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, 'Noto Sans Mono CJK SC', monospace;}</style>
+<defs><marker id="aadbac7" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#adbac7"/></marker><marker id="af38020" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#f38020"/></marker><marker id="a2aabee" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2aabee"/></marker><marker id="a7c8cff" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#7c8cff"/></marker><marker id="a57ab5a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#57ab5a"/></marker><marker id="a768390" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#768390"/></marker>
+<linearGradient id="gOr" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#f38020"/><stop offset="1" stop-color="#f6a04d"/></linearGradient>
+<linearGradient id="gBl" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#2aabee"/><stop offset="1" stop-color="#7c8cff"/></linearGradient>
+</defs>
+<rect width="960" height="484" rx="16" fill="#22272e"/>
+<text x="32" y="44" font-size="20" fill="#e6edf3" text-anchor="start" font-weight="600">GitHub Actions 一键部署</text>
+<text x="32" y="68" font-size="13" fill="#adbac7" text-anchor="start">你只需要完成上面 4 步, 下面的流水线由 .github/workflows/deploy.yml 自动执行。</text>
+<rect x="32" y="90" width="212" height="104" rx="12" fill="#2d333b" stroke="#444c56" stroke-width="1"/>
+<rect x="48" y="90" width="180" height="3" rx="1.5" fill="#f38020"/>
+<circle cx="60" cy="120" r="13" fill="#f38020"/><text x="60" y="125" font-size="14" fill="#22272e" text-anchor="middle" font-weight="600">1</text>
+<text x="82" y="126" font-size="15.5" fill="#e6edf3" text-anchor="start" font-weight="600">Fork 仓库</text>
+<text x="50" y="154" font-size="12.5" fill="#adbac7" text-anchor="start">Fork 到自己的账号</text>
+<text x="50" y="176" font-size="12" fill="#f38020" text-anchor="start" class="m">HengXin666/HX-CF-Drive</text>
+<path d="M246,142 L258,142" fill="none" stroke="#768390" stroke-width="1.6" marker-end="url(#a768390)"/>
+<rect x="260" y="90" width="212" height="104" rx="12" fill="#2d333b" stroke="#444c56" stroke-width="1"/>
+<rect x="276" y="90" width="180" height="3" rx="1.5" fill="#f38020"/>
+<circle cx="288" cy="120" r="13" fill="#f38020"/><text x="288" y="125" font-size="14" fill="#22272e" text-anchor="middle" font-weight="600">2</text>
+<text x="310" y="126" font-size="15.5" fill="#e6edf3" text-anchor="start" font-weight="600">建 CF API 令牌</text>
+<text x="278" y="154" font-size="12.5" fill="#adbac7" text-anchor="start">模板: 编辑 Cloudflare Workers</text>
+<text x="278" y="176" font-size="12.5" fill="#adbac7" text-anchor="start">再加 账户 / D1 / 编辑</text>
+<path d="M474,142 L486,142" fill="none" stroke="#768390" stroke-width="1.6" marker-end="url(#a768390)"/>
+<rect x="488" y="90" width="212" height="104" rx="12" fill="#2d333b" stroke="#444c56" stroke-width="1"/>
+<rect x="504" y="90" width="180" height="3" rx="1.5" fill="#7c8cff"/>
+<circle cx="516" cy="120" r="13" fill="#7c8cff"/><text x="516" y="125" font-size="14" fill="#22272e" text-anchor="middle" font-weight="600">3</text>
+<text x="538" y="126" font-size="15.5" fill="#e6edf3" text-anchor="start" font-weight="600">填 Secrets 与变量</text>
+<text x="506" y="154" font-size="12.5" fill="#adbac7" text-anchor="start">Settings, Secrets and</text>
+<text x="506" y="176" font-size="12.5" fill="#adbac7" text-anchor="start">variables, Actions</text>
+<path d="M702,142 L714,142" fill="none" stroke="#768390" stroke-width="1.6" marker-end="url(#a768390)"/>
+<rect x="716" y="90" width="212" height="104" rx="12" fill="#2d333b" stroke="#444c56" stroke-width="1"/>
+<rect x="732" y="90" width="180" height="3" rx="1.5" fill="#2aabee"/>
+<circle cx="744" cy="120" r="13" fill="#2aabee"/><text x="744" y="125" font-size="14" fill="#22272e" text-anchor="middle" font-weight="600">4</text>
+<text x="766" y="126" font-size="15.5" fill="#e6edf3" text-anchor="start" font-weight="600">Run workflow</text>
+<text x="734" y="154" font-size="12.5" fill="#adbac7" text-anchor="start">Actions, Deploy, 手动运行</text>
+<text x="734" y="176" font-size="12.5" fill="#adbac7" text-anchor="start">首次勾选 &quot;登记频道&quot;</text>
+<path d="M480,198 L480,226" fill="none" stroke="#f38020" stroke-width="2" marker-end="url(#af38020)"/>
+<rect x="32" y="232" width="896" height="176" rx="16" fill="#f38020" fill-opacity="0.04" stroke="#f38020" stroke-width="1.2" stroke-dasharray="6 5"/>
+<text x="52" y="258" font-size="13.5" fill="#f38020" text-anchor="start" font-weight="600">deploy.yml 自动执行</text>
+<text x="908" y="258" font-size="12" fill="#768390" text-anchor="end">虚线 = 按配置可选</text>
+<rect x="52" y="272" width="156" height="44" rx="10" fill="#2d333b" stroke="#f38020" stroke-width="1"/>
+<text x="74" y="299" font-size="11.5" fill="#f38020" text-anchor="middle" class="m">01</text>
+<text x="92" y="299" font-size="13" fill="#e6edf3" text-anchor="start">检查 Secrets</text>
+<path d="M209,294 L222,294" fill="none" stroke="#768390" stroke-width="1.4" marker-end="url(#a768390)"/>
+<rect x="224" y="272" width="156" height="44" rx="10" fill="#2d333b" stroke="#f38020" stroke-width="1"/>
+<text x="246" y="299" font-size="11.5" fill="#f38020" text-anchor="middle" class="m">02</text>
+<text x="264" y="299" font-size="13" fill="#e6edf3" text-anchor="start">安装依赖</text>
+<path d="M381,294 L394,294" fill="none" stroke="#768390" stroke-width="1.4" marker-end="url(#a768390)"/>
+<rect x="396" y="272" width="156" height="44" rx="10" fill="#2d333b" stroke="#f38020" stroke-width="1"/>
+<text x="418" y="299" font-size="11.5" fill="#f38020" text-anchor="middle" class="m">03</text>
+<text x="436" y="299" font-size="13" fill="#e6edf3" text-anchor="start">类型检查 + 单测</text>
+<path d="M553,294 L566,294" fill="none" stroke="#768390" stroke-width="1.4" marker-end="url(#a768390)"/>
+<rect x="568" y="272" width="156" height="44" rx="10" fill="#2d333b" stroke="#f38020" stroke-width="1"/>
+<text x="590" y="299" font-size="11.5" fill="#f38020" text-anchor="middle" class="m">04</text>
+<text x="608" y="299" font-size="13" fill="#e6edf3" text-anchor="start">建 D1 或复用</text>
+<path d="M725,294 L738,294" fill="none" stroke="#768390" stroke-width="1.4" marker-end="url(#a768390)"/>
+<rect x="740" y="272" width="156" height="44" rx="10" fill="#2d333b" stroke="#f38020" stroke-width="1"/>
+<text x="762" y="299" font-size="11.5" fill="#f38020" text-anchor="middle" class="m">05</text>
+<text x="780" y="299" font-size="13" fill="#e6edf3" text-anchor="start">应用迁移</text>
+<rect x="52" y="342" width="156" height="44" rx="10" fill="#2d333b" stroke="#768390" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="74" y="369" font-size="11.5" fill="#768390" text-anchor="middle" class="m">06</text>
+<text x="92" y="369" font-size="13" fill="#e6edf3" text-anchor="start">自定义域名</text>
+<path d="M209,364 L222,364" fill="none" stroke="#768390" stroke-width="1.4" marker-end="url(#a768390)"/>
+<rect x="224" y="342" width="156" height="44" rx="10" fill="#2d333b" stroke="#f38020" stroke-width="1"/>
+<text x="246" y="369" font-size="11.5" fill="#f38020" text-anchor="middle" class="m">07</text>
+<text x="264" y="369" font-size="13" fill="#e6edf3" text-anchor="start">构建前端 + 部署</text>
+<path d="M381,364 L394,364" fill="none" stroke="#768390" stroke-width="1.4" marker-end="url(#a768390)"/>
+<rect x="396" y="342" width="156" height="44" rx="10" fill="#2d333b" stroke="#f38020" stroke-width="1"/>
+<text x="418" y="369" font-size="11.5" fill="#f38020" text-anchor="middle" class="m">08</text>
+<text x="436" y="369" font-size="13" fill="#e6edf3" text-anchor="start">写入 Worker 机密</text>
+<path d="M553,364 L566,364" fill="none" stroke="#768390" stroke-width="1.4" marker-end="url(#a768390)"/>
+<rect x="568" y="342" width="156" height="44" rx="10" fill="#2d333b" stroke="#768390" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="590" y="369" font-size="11.5" fill="#768390" text-anchor="middle" class="m">09</text>
+<text x="608" y="369" font-size="13" fill="#e6edf3" text-anchor="start">登记 Bot 与频道</text>
+<path d="M725,364 L738,364" fill="none" stroke="#768390" stroke-width="1.4" marker-end="url(#a768390)"/>
+<rect x="740" y="342" width="156" height="44" rx="10" fill="#2d333b" stroke="#f38020" stroke-width="1"/>
+<text x="762" y="369" font-size="11.5" fill="#f38020" text-anchor="middle" class="m">10</text>
+<text x="780" y="369" font-size="13" fill="#e6edf3" text-anchor="start">冒烟测试</text>
+<path d="M818,317 L818,329 L130,329 L130,341" fill="none" stroke="#768390" stroke-width="1.4" marker-end="url(#a768390)"/>
+<rect x="32" y="422" width="444" height="44" rx="10" fill="#2d333b"/>
+<rect x="32" y="422" width="4" height="44" rx="2" fill="#57ab5a"/>
+<text x="50" y="449" font-size="13.5" fill="#57ab5a" text-anchor="start" font-weight="600">部署地址</text>
+<text x="122" y="449" font-size="12" fill="#adbac7" text-anchor="start" class="m">https://hx-cf-drive.&lt;子域&gt;.workers.dev</text>
+<rect x="484" y="422" width="444" height="44" rx="10" fill="#2d333b"/>
+<rect x="484" y="422" width="4" height="44" rx="2" fill="#2aabee"/>
+<text x="502" y="449" font-size="13.5" fill="#2aabee" text-anchor="start" font-weight="600">每日维护</text>
+<text x="574" y="449" font-size="13" fill="#adbac7" text-anchor="start">maintenance.yml 每天 19:00 UTC 调维护接口</text>
+</svg>

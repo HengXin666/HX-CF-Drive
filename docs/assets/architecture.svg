@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="530" viewBox="0 0 960 530" role="img" aria-label="HX-CF-Drive 架构图">
+<title>HX-CF-Drive 架构图</title>
+<style>text{font-family:-apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;} .m{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, 'Noto Sans Mono CJK SC', monospace;}</style>
+<defs><marker id="aadbac7" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#adbac7"/></marker><marker id="af38020" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#f38020"/></marker><marker id="a2aabee" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2aabee"/></marker><marker id="a7c8cff" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#7c8cff"/></marker><marker id="a57ab5a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#57ab5a"/></marker><marker id="a768390" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#768390"/></marker>
+<linearGradient id="gOr" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#f38020"/><stop offset="1" stop-color="#f6a04d"/></linearGradient>
+<linearGradient id="gBl" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#2aabee"/><stop offset="1" stop-color="#7c8cff"/></linearGradient>
+</defs>
+<rect width="960" height="530" rx="16" fill="#22272e"/>
+<text x="32" y="46" font-size="20" fill="#e6edf3" text-anchor="start" font-weight="600">架构总览</text>
+<text x="32" y="70" font-size="13" fill="#adbac7" text-anchor="start">一个 Worker, 一个 D1 数据库, 若干 Telegram 私有频道。没有 R2, 没有 Durable Object。</text>
+<text x="32" y="110" font-size="12" fill="#768390" text-anchor="start" font-weight="600">客户端</text>
+<rect x="32" y="122" width="180" height="62" rx="12" fill="#2d333b" stroke="#444c56" stroke-width="1"/>
+<rect x="46" y="136" width="6" height="34" rx="3" fill="#f38020"/>
+<text x="64" y="150" font-size="15" fill="#e6edf3" text-anchor="start" font-weight="600">浏览器</text>
+<text x="64" y="170" font-size="12" fill="#adbac7" text-anchor="start">React 前端 (HX-UI)</text>
+<path d="M212,153 L250,153" fill="none" stroke="#adbac7" stroke-width="1.6" marker-end="url(#aadbac7)"/>
+<rect x="32" y="198" width="180" height="62" rx="12" fill="#2d333b" stroke="#444c56" stroke-width="1"/>
+<rect x="46" y="212" width="6" height="34" rx="3" fill="#7c8cff"/>
+<text x="64" y="226" font-size="15" fill="#e6edf3" text-anchor="start" font-weight="600">AI Agent</text>
+<text x="64" y="246" font-size="12" fill="#adbac7" text-anchor="start">Skill, hxd 命令行</text>
+<path d="M212,229 L250,229" fill="none" stroke="#adbac7" stroke-width="1.6" marker-end="url(#aadbac7)"/>
+<rect x="32" y="274" width="180" height="62" rx="12" fill="#2d333b" stroke="#444c56" stroke-width="1"/>
+<rect x="46" y="288" width="6" height="34" rx="3" fill="#2aabee"/>
+<text x="64" y="302" font-size="15" fill="#e6edf3" text-anchor="start" font-weight="600">WebDAV</text>
+<text x="64" y="322" font-size="12" fill="#adbac7" text-anchor="start">rclone, Infuse, Finder</text>
+<path d="M212,305 L250,305" fill="none" stroke="#adbac7" stroke-width="1.6" marker-end="url(#aadbac7)"/>
+<rect x="32" y="350" width="180" height="62" rx="12" fill="#2d333b" stroke="#444c56" stroke-width="1"/>
+<rect x="46" y="364" width="6" height="34" rx="3" fill="#57ab5a"/>
+<text x="64" y="378" font-size="15" fill="#e6edf3" text-anchor="start" font-weight="600">图床工具</text>
+<text x="64" y="398" font-size="12" fill="#adbac7" text-anchor="start">PicGo, ShareX</text>
+<path d="M212,381 L250,381" fill="none" stroke="#adbac7" stroke-width="1.6" marker-end="url(#aadbac7)"/>
+<rect x="252" y="96" width="400" height="410" rx="18" fill="#f38020" fill-opacity="0.05" stroke="#f38020" stroke-width="1.4" stroke-dasharray="6 5"/>
+<text x="272" y="124" font-size="14" fill="#f38020" text-anchor="start" font-weight="600">Cloudflare 边缘网络</text>
+<rect x="272" y="138" width="360" height="66" rx="12" fill="#2d333b" stroke="#444c56" stroke-width="1"/>
+<text x="290" y="164" font-size="15" fill="#e6edf3" text-anchor="start" font-weight="600">Static Assets</text>
+<text x="400" y="164" font-size="12" fill="#768390" text-anchor="start" class="m">dist/web</text>
+<text x="290" y="188" font-size="12.5" fill="#adbac7" text-anchor="start">命中静态文件直接返回, 不进 Worker, 不计请求</text>
+<path d="M452,204 L452,234" fill="none" stroke="#f38020" stroke-width="1.6" marker-end="url(#af38020)"/>
+<text x="462" y="224" font-size="11.5" fill="#768390" text-anchor="start" class="m">未命中 /api /dav /f /s</text>
+<rect x="272" y="238" width="360" height="194" rx="12" fill="#2d333b" stroke="#f38020" stroke-width="1.2"/>
+<text x="290" y="266" font-size="16" fill="#e6edf3" text-anchor="start" font-weight="600">Worker</text>
+<text x="352" y="266" font-size="12" fill="#768390" text-anchor="start">Hono, TypeScript</text>
+<rect x="290" y="282" width="82" height="20" rx="6" fill="#22272e" stroke="#444c56" stroke-width="1"/>
+<text x="331" y="296" font-size="11.5" fill="#f38020" text-anchor="middle" class="m">/api/v1</text>
+<text x="384" y="297" font-size="12.5" fill="#adbac7" text-anchor="start">REST API, 受限令牌</text>
+<rect x="290" y="308" width="82" height="20" rx="6" fill="#22272e" stroke="#444c56" stroke-width="1"/>
+<text x="331" y="322" font-size="11.5" fill="#f38020" text-anchor="middle" class="m">/dav</text>
+<text x="384" y="323" font-size="12.5" fill="#adbac7" text-anchor="start">WebDAV</text>
+<rect x="290" y="334" width="82" height="20" rx="6" fill="#22272e" stroke="#444c56" stroke-width="1"/>
+<text x="331" y="348" font-size="11.5" fill="#f38020" text-anchor="middle" class="m">/f/:id</text>
+<text x="384" y="349" font-size="12.5" fill="#adbac7" text-anchor="start">签名永久直链</text>
+<rect x="290" y="360" width="82" height="20" rx="6" fill="#22272e" stroke="#444c56" stroke-width="1"/>
+<text x="331" y="374" font-size="11.5" fill="#f38020" text-anchor="middle" class="m">/s/:id</text>
+<text x="384" y="375" font-size="12.5" fill="#adbac7" text-anchor="start">分享链接</text>
+<line x1="290" y1="392" x2="614" y2="392" stroke="#444c56"/>
+<circle cx="296" cy="412" r="3" fill="#2aabee"/>
+<text x="306" y="416" font-size="12.5" fill="#adbac7" text-anchor="start">isolate 内存缓存: 分片清单, file_path, 节点</text>
+<rect x="272" y="446" width="360" height="44" rx="12" fill="#2d333b" stroke="#444c56" stroke-width="1"/>
+<path d="M290,468 a8,8 0 1 0 16,0 a8,8 0 1 0 -16,0 M298,463 V468 L302,471" fill="none" stroke="#768390" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="316" y="473" font-size="12.5" fill="#adbac7" text-anchor="start">每日维护: Bot 探活, 回收站清理, 删除孤儿分片</text>
+<rect x="700" y="122" width="228" height="150" rx="14" fill="#2d333b" stroke="#7c8cff" stroke-width="1.2"/>
+<path d="M718,142 v16 a10,4 0 0 0 20,0 v-16 a10,4 0 0 0 -20,0 a10,4 0 0 0 20,0" fill="none" stroke="#7c8cff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="748" y="155" font-size="16" fill="#e6edf3" text-anchor="start" font-weight="600">D1</text>
+<text x="774" y="155" font-size="12" fill="#768390" text-anchor="start">SQLite</text>
+<text x="718" y="186" font-size="12" fill="#7c8cff" text-anchor="start" class="m">nodes</text>
+<text x="772" y="186" font-size="12.5" fill="#adbac7" text-anchor="start">目录树与元数据</text>
+<text x="718" y="209" font-size="12" fill="#7c8cff" text-anchor="start" class="m">blobs</text>
+<text x="772" y="209" font-size="12.5" fill="#adbac7" text-anchor="start">分片清单, 一行 JSON</text>
+<text x="718" y="232" font-size="12" fill="#7c8cff" text-anchor="start" class="m">tokens</text>
+<text x="772" y="232" font-size="12.5" fill="#adbac7" text-anchor="start">受限 API 令牌</text>
+<text x="718" y="255" font-size="12" fill="#7c8cff" text-anchor="start" class="m">bots</text>
+<text x="772" y="255" font-size="12.5" fill="#adbac7" text-anchor="start">Bot 池与频道状态</text>
+<rect x="700" y="296" width="228" height="210" rx="14" fill="#2d333b" stroke="#2aabee" stroke-width="1.2"/>
+<path d="M716,322 L740,312 L734,334 L728,326 Z" fill="none" stroke="#2aabee" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="748" y="328" font-size="16" fill="#e6edf3" text-anchor="start" font-weight="600">Telegram</text>
+<text x="834" y="328" font-size="12" fill="#768390" text-anchor="start">Bot API</text>
+<circle cx="740" cy="366" r="15" fill="#2aabee" fill-opacity="0.16"/>
+<circle cx="740" cy="366" r="15" fill="none" stroke="#2aabee" stroke-width="1.4"/>
+<text x="740" y="371" font-size="10.5" fill="#2aabee" text-anchor="middle" font-weight="600">Bot1</text>
+<circle cx="814" cy="366" r="15" fill="#2aabee" fill-opacity="0.16"/>
+<circle cx="814" cy="366" r="15" fill="none" stroke="#2aabee" stroke-width="1.4"/>
+<text x="814" y="371" font-size="10.5" fill="#2aabee" text-anchor="middle" font-weight="600">Bot2</text>
+<circle cx="888" cy="366" r="15" fill="#2aabee" fill-opacity="0.16"/>
+<circle cx="888" cy="366" r="15" fill="none" stroke="#2aabee" stroke-width="1.4"/>
+<text x="888" y="371" font-size="10.5" fill="#2aabee" text-anchor="middle" font-weight="600">Bot3</text>
+<rect x="716" y="404" width="92" height="62" rx="9" fill="#22272e" stroke="#444c56" stroke-width="1"/>
+<text x="762" y="422" font-size="11.5" fill="#adbac7" text-anchor="middle">私有频道 A</text>
+<rect x="726" y="432" width="22" height="22" rx="4" fill="#2aabee" fill-opacity="0.55"/>
+<rect x="751" y="432" width="22" height="22" rx="4" fill="#2aabee" fill-opacity="0.43000000000000005"/>
+<rect x="776" y="432" width="22" height="22" rx="4" fill="#2aabee" fill-opacity="0.31000000000000005"/>
+<line x1="740" y1="381" x2="762" y2="404" stroke="#2aabee" stroke-opacity="0.35"/>
+<line x1="814" y1="381" x2="762" y2="404" stroke="#2aabee" stroke-opacity="0.35"/>
+<line x1="888" y1="381" x2="762" y2="404" stroke="#2aabee" stroke-opacity="0.35"/>
+<rect x="820" y="404" width="92" height="62" rx="9" fill="#22272e" stroke="#444c56" stroke-width="1"/>
+<text x="866" y="422" font-size="11.5" fill="#adbac7" text-anchor="middle">私有频道 B</text>
+<rect x="830" y="432" width="22" height="22" rx="4" fill="#2aabee" fill-opacity="0.55"/>
+<rect x="855" y="432" width="22" height="22" rx="4" fill="#2aabee" fill-opacity="0.43000000000000005"/>
+<rect x="880" y="432" width="22" height="22" rx="4" fill="#2aabee" fill-opacity="0.31000000000000005"/>
+<line x1="740" y1="381" x2="866" y2="404" stroke="#2aabee" stroke-opacity="0.35"/>
+<line x1="814" y1="381" x2="866" y2="404" stroke="#2aabee" stroke-opacity="0.35"/>
+<line x1="888" y1="381" x2="866" y2="404" stroke="#2aabee" stroke-opacity="0.35"/>
+<text x="814" y="490" font-size="11.5" fill="#768390" text-anchor="middle">每片 19 MiB, 文件名为随机 blob id</text>
+<path d="M632,300 L666,300 L666,196 L698,196" fill="none" stroke="#7c8cff" stroke-width="1.6" marker-end="url(#a7c8cff)"/>
+<text x="674" y="252" font-size="11" fill="#7c8cff" text-anchor="start" class="m">SQL</text>
+<path d="M632,360 L666,360 L666,410 L698,410" fill="none" stroke="#2aabee" stroke-width="1.6" marker-end="url(#a2aabee)"/>
+<text x="676" y="400" font-size="11" fill="#2aabee" text-anchor="start">流式</text>
+</svg>

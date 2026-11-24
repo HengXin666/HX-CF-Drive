@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="936" height="372" viewBox="0 0 936 372" role="img" aria-label="HX-CF-Drive 特性">
+<title>HX-CF-Drive 特性</title>
+<style>text{font-family:-apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;} .m{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, 'Noto Sans Mono CJK SC', monospace;}</style>
+<defs><marker id="aadbac7" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#adbac7"/></marker><marker id="af38020" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#f38020"/></marker><marker id="a2aabee" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2aabee"/></marker><marker id="a7c8cff" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#7c8cff"/></marker><marker id="a57ab5a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#57ab5a"/></marker><marker id="a768390" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#768390"/></marker>
+<linearGradient id="gOr" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#f38020"/><stop offset="1" stop-color="#f6a04d"/></linearGradient>
+<linearGradient id="gBl" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#2aabee"/><stop offset="1" stop-color="#7c8cff"/></linearGradient>
+</defs>
+<rect width="936" height="372" rx="16" fill="#22272e"/>
+<rect x="24" y="24" width="296" height="156" rx="14" fill="#2d333b" stroke="#444c56" stroke-width="1"/>
+<rect x="42" y="23" width="260" height="3" rx="1.5" fill="#f38020"/>
+<rect x="44" y="46" width="44" height="44" rx="11" fill="#f38020" fill-opacity="0.14"/>
+<g transform="translate(44,46)"><path d="M12,31 H31 A7,7 0 0 0 31,17 A10,10 0 0 0 12.5,19 A6,6 0 0 0 12,31 Z" fill="none" stroke="#f38020" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="102" y="66" font-size="17" fill="#e6edf3" text-anchor="start" font-weight="600">全在 Cloudflare 上</text>
+<text x="102" y="86" font-size="12" fill="#f38020" text-anchor="start" class="m">Workers + D1 + Assets</text>
+<line x1="44" y1="108" x2="300" y2="108" stroke="#444c56"/>
+<circle cx="50" cy="128" r="2.5" fill="#f38020"/>
+<text x="60" y="133" font-size="13.5" fill="#adbac7" text-anchor="start">免费计划即可运行, 不用 R2 与 DO</text>
+<circle cx="50" cy="154" r="2.5" fill="#f38020"/>
+<text x="60" y="159" font-size="13.5" fill="#adbac7" text-anchor="start">静态前端由 Assets 直出, 不计请求</text>
+<rect x="332" y="24" width="296" height="156" rx="14" fill="#2d333b" stroke="#444c56" stroke-width="1"/>
+<rect x="350" y="23" width="260" height="3" rx="1.5" fill="#2aabee"/>
+<rect x="352" y="46" width="44" height="44" rx="11" fill="#2aabee" fill-opacity="0.14"/>
+<g transform="translate(352,46)"><path d="M10,14 H34 V20 H10 Z M10,23 H34 V29 H10 Z M10,32 H34 V36 H10 Z" fill="none" stroke="#2aabee" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="410" y="66" font-size="17" fill="#e6edf3" text-anchor="start" font-weight="600">Telegram 当块存储</text>
+<text x="410" y="86" font-size="12" fill="#2aabee" text-anchor="start" class="m">Bot API, 19 MiB 分片</text>
+<line x1="352" y1="108" x2="608" y2="108" stroke="#444c56"/>
+<circle cx="358" cy="128" r="2.5" fill="#2aabee"/>
+<text x="368" y="133" font-size="13.5" fill="#adbac7" text-anchor="start">分片写进私有频道, 加频道即扩容</text>
+<circle cx="358" cy="154" r="2.5" fill="#2aabee"/>
+<text x="368" y="159" font-size="13.5" fill="#adbac7" text-anchor="start">Bot 池 x 频道池, 失效自动重绑</text>
+<rect x="640" y="24" width="296" height="156" rx="14" fill="#2d333b" stroke="#444c56" stroke-width="1"/>
+<rect x="658" y="23" width="260" height="3" rx="1.5" fill="#7c8cff"/>
+<rect x="660" y="46" width="44" height="44" rx="11" fill="#7c8cff" fill-opacity="0.14"/>
+<g transform="translate(660,46)"><path d="M22,34 V11 M13,19 L22,10 L31,19 M12,36 H32" fill="none" stroke="#7c8cff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="718" y="66" font-size="17" fill="#e6edf3" text-anchor="start" font-weight="600">无状态分片上传</text>
+<text x="718" y="86" font-size="12" fill="#7c8cff" text-anchor="start" class="m">init, chunk, commit</text>
+<line x1="660" y1="108" x2="916" y2="108" stroke="#444c56"/>
+<circle cx="666" cy="128" r="2.5" fill="#7c8cff"/>
+<text x="676" y="133" font-size="13.5" fill="#adbac7" text-anchor="start">chunk 阶段 D1 零读写, 流式直通</text>
+<circle cx="666" cy="154" r="2.5" fill="#7c8cff"/>
+<text x="676" y="159" font-size="13.5" fill="#adbac7" text-anchor="start">签名回执断点续传, sha256 秒传</text>
+<rect x="24" y="192" width="296" height="156" rx="14" fill="#2d333b" stroke="#444c56" stroke-width="1"/>
+<rect x="42" y="191" width="260" height="3" rx="1.5" fill="#2aabee"/>
+<rect x="44" y="214" width="44" height="44" rx="11" fill="#2aabee" fill-opacity="0.14"/>
+<g transform="translate(44,214)"><path d="M22,9 V31 M13,23 L22,32 L31,23" fill="none" stroke="#2aabee" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M10,37 H16 M19,37 H25 M28,37 H34" fill="none" stroke="#2aabee" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="102" y="234" font-size="17" fill="#e6edf3" text-anchor="start" font-weight="600">Range 拼片下载</text>
+<text x="102" y="254" font-size="12" fill="#2aabee" text-anchor="start" class="m">FixedLengthStream</text>
+<line x1="44" y1="276" x2="300" y2="276" stroke="#444c56"/>
+<circle cx="50" cy="296" r="2.5" fill="#2aabee"/>
+<text x="60" y="301" font-size="13.5" fill="#adbac7" text-anchor="start">子请求预算内动态拼接多个分片</text>
+<circle cx="50" cy="322" r="2.5" fill="#2aabee"/>
+<text x="60" y="327" font-size="13.5" fill="#adbac7" text-anchor="start">超出返回 206, 客户端自动续拉</text>
+<rect x="332" y="192" width="296" height="156" rx="14" fill="#2d333b" stroke="#444c56" stroke-width="1"/>
+<rect x="350" y="191" width="260" height="3" rx="1.5" fill="#f38020"/>
+<rect x="352" y="214" width="44" height="44" rx="11" fill="#f38020" fill-opacity="0.14"/>
+<g transform="translate(352,214)"><circle cx="12" cy="22" r="4.5" fill="none" stroke="#f38020" stroke-width="2"/><circle cx="32" cy="12" r="4.5" fill="none" stroke="#f38020" stroke-width="2"/><circle cx="32" cy="32" r="4.5" fill="none" stroke="#f38020" stroke-width="2"/><path d="M16,20 L28,14 M16,24 L28,30" fill="none" stroke="#f38020" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="410" y="234" font-size="17" fill="#e6edf3" text-anchor="start" font-weight="600">多种接入方式</text>
+<text x="410" y="254" font-size="12" fill="#f38020" text-anchor="start" class="m">REST, WebDAV, 直链, 分享</text>
+<line x1="352" y1="276" x2="608" y2="276" stroke="#444c56"/>
+<circle cx="358" cy="296" r="2.5" fill="#f38020"/>
+<text x="368" y="301" font-size="13.5" fill="#adbac7" text-anchor="start">rclone, Infuse, Finder, RaiDrive</text>
+<circle cx="358" cy="322" r="2.5" fill="#f38020"/>
+<text x="368" y="327" font-size="13.5" fill="#adbac7" text-anchor="start">PicGo, ShareX, 受限 API 令牌</text>
+<rect x="640" y="192" width="296" height="156" rx="14" fill="#2d333b" stroke="#444c56" stroke-width="1"/>
+<rect x="658" y="191" width="260" height="3" rx="1.5" fill="#7c8cff"/>
+<rect x="660" y="214" width="44" height="44" rx="11" fill="#7c8cff" fill-opacity="0.14"/>
+<g transform="translate(660,214)"><path d="M8,11 H36 V33 H8 Z" fill="none" stroke="#7c8cff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M14,18 L19,22 L14,26 M22,27 H30" fill="none" stroke="#7c8cff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="718" y="234" font-size="17" fill="#e6edf3" text-anchor="start" font-weight="600">为 AI Agent 准备</text>
+<text x="718" y="254" font-size="12" fill="#7c8cff" text-anchor="start" class="m">/skill.md, /llms.txt</text>
+<line x1="660" y1="276" x2="916" y2="276" stroke="#444c56"/>
+<circle cx="666" cy="296" r="2.5" fill="#7c8cff"/>
+<text x="676" y="301" font-size="13.5" fill="#adbac7" text-anchor="start">开箱即用的 Agent Skill</text>
+<circle cx="666" cy="322" r="2.5" fill="#7c8cff"/>
+<text x="676" y="327" font-size="13.5" fill="#adbac7" text-anchor="start">零依赖命令行 hxd, 自动分片重试</text>
+</svg>

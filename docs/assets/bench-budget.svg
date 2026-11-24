@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="370" viewBox="0 0 960 370" role="img" aria-label="日常场景的日用量">
+<title>日常场景的日用量</title>
+<style>text{font-family:-apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;} .m{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, 'Noto Sans Mono CJK SC', monospace;}</style>
+<defs><marker id="aadbac7" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#adbac7"/></marker><marker id="af38020" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#f38020"/></marker><marker id="a2aabee" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2aabee"/></marker><marker id="a7c8cff" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#7c8cff"/></marker><marker id="a57ab5a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#57ab5a"/></marker><marker id="a768390" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#768390"/></marker>
+<linearGradient id="gOr" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#f38020"/><stop offset="1" stop-color="#f6a04d"/></linearGradient>
+<linearGradient id="gBl" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#2aabee"/><stop offset="1" stop-color="#7c8cff"/></linearGradient>
+</defs>
+<rect width="960" height="370" rx="16" fill="#22272e"/>
+<text x="40" y="50" font-size="24" fill="#e6edf3" text-anchor="start" font-weight="600">日常场景的日用量</text>
+<text x="40" y="78" font-size="13" fill="#adbac7" text-anchor="start">每天下载 100 GB, 上传 10 GB, 平均文件 20 MB, 外加 500 次打开目录。按实测单价计算。</text>
+<text x="40" y="136" font-size="14" fill="#e6edf3" text-anchor="start">Workers 请求</text>
+<rect x="170" y="122" width="560" height="20" rx="6" fill="#2d333b" stroke="#444c56" stroke-width="1"/>
+<rect x="170" y="122" width="45.74080000000001" height="20" rx="6" fill="url(#gBl)"/>
+<text x="745" y="137" font-size="13" fill="#e6edf3" text-anchor="start" font-weight="600">8.2%</text>
+<text x="810" y="137" font-size="12" fill="#768390" text-anchor="start">8,168 / 10 万/天</text>
+<text x="40" y="186" font-size="14" fill="#e6edf3" text-anchor="start">D1 行读</text>
+<rect x="170" y="172" width="560" height="20" rx="6" fill="#2d333b" stroke="#444c56" stroke-width="1"/>
+<rect x="170" y="172" width="4.966976" height="20" rx="6" fill="url(#gBl)"/>
+<text x="745" y="187" font-size="13" fill="#e6edf3" text-anchor="start" font-weight="600">0.9%</text>
+<text x="810" y="187" font-size="12" fill="#768390" text-anchor="start">44,348 / 500 万/天</text>
+<text x="40" y="236" font-size="14" fill="#e6edf3" text-anchor="start">D1 行写</text>
+<rect x="170" y="222" width="560" height="20" rx="6" fill="#2d333b" stroke="#444c56" stroke-width="1"/>
+<rect x="170" y="222" width="17.2032" height="20" rx="6" fill="url(#gBl)"/>
+<text x="745" y="237" font-size="13" fill="#e6edf3" text-anchor="start" font-weight="600">3.1%</text>
+<text x="810" y="237" font-size="12" fill="#768390" text-anchor="start">3,072 / 10 万/天</text>
+<text x="40" y="286" font-size="14" fill="#e6edf3" text-anchor="start">R2</text>
+<rect x="170" y="272" width="560" height="20" rx="6" fill="#2d333b" stroke="#444c56" stroke-width="1"/>
+<text x="745" y="287" font-size="13" fill="#e6edf3" text-anchor="start" font-weight="600">0</text>
+<text x="810" y="287" font-size="12" fill="#768390" text-anchor="start">不使用</text>
+<text x="40" y="345" font-size="12.5" fill="#adbac7" text-anchor="start">结论: 下载看 Workers 请求数, 文件越小越先见底; 大量小文件上传看 D1 写入; D1 读和 R2 基本可以忽略。</text>
+</svg>

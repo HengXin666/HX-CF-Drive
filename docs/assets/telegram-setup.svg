@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="400" viewBox="0 0 960 400" role="img" aria-label="Telegram 准备步骤">
+<title>Telegram 准备步骤</title>
+<style>text{font-family:-apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;} .m{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, 'Noto Sans Mono CJK SC', monospace;}</style>
+<defs><marker id="aadbac7" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#adbac7"/></marker><marker id="af38020" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#f38020"/></marker><marker id="a2aabee" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2aabee"/></marker><marker id="a7c8cff" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#7c8cff"/></marker><marker id="a57ab5a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#57ab5a"/></marker><marker id="a768390" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#768390"/></marker>
+<linearGradient id="gOr" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#f38020"/><stop offset="1" stop-color="#f6a04d"/></linearGradient>
+<linearGradient id="gBl" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#2aabee"/><stop offset="1" stop-color="#7c8cff"/></linearGradient>
+</defs>
+<rect width="960" height="400" rx="16" fill="#22272e"/>
+<text x="32" y="44" font-size="20" fill="#e6edf3" text-anchor="start" font-weight="600">Telegram 准备</text>
+<text x="32" y="68" font-size="13" fill="#adbac7" text-anchor="start">用一个专门的存储小号建私有频道, 只用 Bot API, 不用 MTProto 和 session string。</text>
+<rect x="32" y="90" width="212" height="206" rx="12" fill="#2d333b" stroke="#444c56" stroke-width="1"/>
+<rect x="48" y="90" width="180" height="3" rx="1.5" fill="#2aabee"/>
+<circle cx="60" cy="122" r="13" fill="#2aabee"/><text x="60" y="127" font-size="14" fill="#22272e" text-anchor="middle" font-weight="600">1</text>
+<text x="82" y="128" font-size="15.5" fill="#e6edf3" text-anchor="start" font-weight="600">建 Bot</text>
+<text x="50" y="160" font-size="12.5" fill="#adbac7" text-anchor="start">找 @BotFather 发 /newbot</text>
+<text x="50" y="184" font-size="12.5" fill="#adbac7" text-anchor="start">建 3 到 5 个, 记下 token</text>
+<text x="50" y="208" font-size="12.5" fill="#adbac7" text-anchor="start">/setjoingroups 选 Disable</text>
+<rect x="48" y="242" width="180" height="36" rx="8" fill="#22272e" stroke="#444c56" stroke-width="1"/>
+<text x="138" y="265" font-size="12" fill="#2aabee" text-anchor="middle" class="m">123456789:AAH...</text>
+<path d="M246,193 L258,193" fill="none" stroke="#768390" stroke-width="1.6" marker-end="url(#a768390)"/>
+<rect x="260" y="90" width="212" height="206" rx="12" fill="#2d333b" stroke="#444c56" stroke-width="1"/>
+<rect x="276" y="90" width="180" height="3" rx="1.5" fill="#2aabee"/>
+<circle cx="288" cy="122" r="13" fill="#2aabee"/><text x="288" y="127" font-size="14" fill="#22272e" text-anchor="middle" font-weight="600">2</text>
+<text x="310" y="128" font-size="15.5" fill="#e6edf3" text-anchor="start" font-weight="600">建私有频道</text>
+<text x="278" y="160" font-size="12.5" fill="#adbac7" text-anchor="start">用存储小号新建频道</text>
+<text x="278" y="184" font-size="12.5" fill="#adbac7" text-anchor="start">类型选私有, 不设用户名</text>
+<text x="278" y="208" font-size="12.5" fill="#adbac7" text-anchor="start">关闭签名与讨论组</text>
+<rect x="276" y="242" width="180" height="36" rx="8" fill="#22272e" stroke="#444c56" stroke-width="1"/>
+<path d="M294,258 v-3 a6,6 0 0 1 12,0 v3 M291,258 h18 v11 h-18 z" fill="none" stroke="#2aabee" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="320" y="265" font-size="12.5" fill="#e6edf3" text-anchor="start">私有, 无公开链接</text>
+<path d="M474,193 L486,193" fill="none" stroke="#768390" stroke-width="1.6" marker-end="url(#a768390)"/>
+<rect x="488" y="90" width="212" height="206" rx="12" fill="#2d333b" stroke="#444c56" stroke-width="1"/>
+<rect x="504" y="90" width="180" height="3" rx="1.5" fill="#2aabee"/>
+<circle cx="516" cy="122" r="13" fill="#2aabee"/><text x="516" y="127" font-size="14" fill="#22272e" text-anchor="middle" font-weight="600">3</text>
+<text x="538" y="128" font-size="15.5" fill="#e6edf3" text-anchor="start" font-weight="600">Bot 设管理员</text>
+<text x="506" y="160" font-size="12.5" fill="#adbac7" text-anchor="start">频道设置, 管理员, 添加</text>
+<text x="506" y="184" font-size="12.5" fill="#adbac7" text-anchor="start">逐个添加全部 Bot</text>
+<text x="506" y="208" font-size="12.5" fill="#adbac7" text-anchor="start">主号也设为管理员兜底</text>
+<rect x="504" y="242" width="180" height="36" rx="8" fill="#22272e" stroke="#444c56" stroke-width="1"/>
+<rect x="516" y="253" width="14" height="14" rx="3" fill="#2aabee"/>
+<path d="M519,260 l3,3 l5,-6" fill="none" stroke="#22272e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="536" y="265" font-size="12" fill="#e6edf3" text-anchor="start">发布消息</text>
+<rect x="602" y="253" width="14" height="14" rx="3" fill="#2aabee"/>
+<path d="M605,260 l3,3 l5,-6" fill="none" stroke="#22272e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="622" y="265" font-size="12" fill="#e6edf3" text-anchor="start">删除消息</text>
+<path d="M702,193 L714,193" fill="none" stroke="#768390" stroke-width="1.6" marker-end="url(#a768390)"/>
+<rect x="716" y="90" width="212" height="206" rx="12" fill="#2d333b" stroke="#444c56" stroke-width="1"/>
+<rect x="732" y="90" width="180" height="3" rx="1.5" fill="#2aabee"/>
+<circle cx="744" cy="122" r="13" fill="#2aabee"/><text x="744" y="127" font-size="14" fill="#22272e" text-anchor="middle" font-weight="600">4</text>
+<text x="766" y="128" font-size="15.5" fill="#e6edf3" text-anchor="start" font-weight="600">取频道 id</text>
+<text x="734" y="160" font-size="12.5" fill="#adbac7" text-anchor="start">网页版打开频道, 地址栏</text>
+<text x="734" y="184" font-size="12.5" fill="#adbac7" text-anchor="start"># 后的数字前补 -100</text>
+<text x="734" y="208" font-size="12.5" fill="#adbac7" text-anchor="start">或 getUpdates 的 chat.id</text>
+<rect x="732" y="242" width="180" height="36" rx="8" fill="#22272e" stroke="#444c56" stroke-width="1"/>
+<text x="822" y="265" font-size="12.5" fill="#f38020" text-anchor="middle" class="m">-1001234567890</text>
+<rect x="32" y="316" width="444" height="52" rx="10" fill="#2d333b"/>
+<rect x="32" y="316" width="4" height="52" rx="2" fill="#2aabee"/>
+<text x="52" y="347" font-size="13.5" fill="#e6edf3" text-anchor="start">Bot token, 逗号分隔</text>
+<path d="M246,342 L282,342" fill="none" stroke="#2aabee" stroke-width="1.6" marker-end="url(#a2aabee)"/>
+<rect x="294" y="328" width="164" height="28" rx="7" fill="#22272e" stroke="#2aabee" stroke-width="1"/>
+<text x="376" y="347" font-size="12.5" fill="#2aabee" text-anchor="middle" class="m">BOT_TOKENS</text>
+<rect x="484" y="316" width="444" height="52" rx="10" fill="#2d333b"/>
+<rect x="484" y="316" width="4" height="52" rx="2" fill="#f38020"/>
+<text x="504" y="347" font-size="13.5" fill="#e6edf3" text-anchor="start">-100 开头的频道 id</text>
+<path d="M698,342 L734,342" fill="none" stroke="#f38020" stroke-width="1.6" marker-end="url(#af38020)"/>
+<rect x="746" y="328" width="164" height="28" rx="7" fill="#22272e" stroke="#f38020" stroke-width="1"/>
+<text x="828" y="347" font-size="12.5" fill="#f38020" text-anchor="middle" class="m">TG_CHANNEL_ID</text>
+<text x="32" y="390" font-size="12" fill="#768390" text-anchor="start">两个值都存为 GitHub 仓库 Secret; Bot 也可以部署后在后台添加。</text>
+</svg>

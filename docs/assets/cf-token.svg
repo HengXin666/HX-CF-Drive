@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="452" viewBox="0 0 960 452" role="img" aria-label="创建 Cloudflare API 令牌">
+<title>创建 Cloudflare API 令牌</title>
+<style>text{font-family:-apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;} .m{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, 'Noto Sans Mono CJK SC', monospace;}</style>
+<defs><marker id="aadbac7" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#adbac7"/></marker><marker id="af38020" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#f38020"/></marker><marker id="a2aabee" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2aabee"/></marker><marker id="a7c8cff" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#7c8cff"/></marker><marker id="a57ab5a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#57ab5a"/></marker><marker id="a768390" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#768390"/></marker>
+<linearGradient id="gOr" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#f38020"/><stop offset="1" stop-color="#f6a04d"/></linearGradient>
+<linearGradient id="gBl" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#2aabee"/><stop offset="1" stop-color="#7c8cff"/></linearGradient>
+</defs>
+<rect width="960" height="452" rx="16" fill="#22272e"/>
+<text x="32" y="44" font-size="20" fill="#e6edf3" text-anchor="start" font-weight="600">创建 Cloudflare API 令牌</text>
+<text x="32" y="68" font-size="13" fill="#adbac7" text-anchor="start">我的个人资料, API 令牌, 创建令牌, 使用模板 &quot;编辑 Cloudflare Workers&quot;, 再按下图补齐。</text>
+<rect x="32" y="88" width="576" height="348" rx="14" fill="#2d333b" stroke="#444c56" stroke-width="1"/>
+<rect x="32" y="88" width="576" height="40" rx="14" fill="#373e47"/>
+<rect x="32" y="114" width="576" height="14" fill="#373e47"/>
+<circle cx="54" cy="108" r="5" fill="#ff5f57" fill-opacity="0.8"/>
+<circle cx="70" cy="108" r="5" fill="#febc2e" fill-opacity="0.8"/>
+<circle cx="86" cy="108" r="5" fill="#28c840" fill-opacity="0.8"/>
+<text x="114" y="113" font-size="13" fill="#adbac7" text-anchor="start">编辑 Cloudflare Workers</text>
+<text x="52" y="154" font-size="13" fill="#768390" text-anchor="start" font-weight="600">权限</text>
+<rect x="46" y="166" width="548" height="32" rx="8" fill="#22272e" stroke="#444c56" stroke-width="1"/>
+<rect x="52" y="172" width="84" height="20" rx="5" fill="#2d333b" stroke="#444c56" stroke-width="1"/>
+<text x="62" y="187" font-size="12.5" fill="#e6edf3" text-anchor="start">账户</text>
+<rect x="144" y="172" width="148" height="20" rx="5" fill="#2d333b" stroke="#444c56" stroke-width="1"/>
+<text x="154" y="187" font-size="12.5" fill="#e6edf3" text-anchor="start">Workers 脚本</text>
+<rect x="302" y="172" width="100" height="20" rx="5" fill="#2d333b" stroke="#444c56" stroke-width="1"/>
+<text x="312" y="187" font-size="12.5" fill="#e6edf3" text-anchor="start">编辑</text>
+<text x="580" y="187" font-size="12" fill="#768390" text-anchor="end">模板自带</text>
+<rect x="46" y="206" width="548" height="32" rx="8" fill="#22272e" stroke="#444c56" stroke-width="1"/>
+<rect x="52" y="212" width="84" height="20" rx="5" fill="#2d333b" stroke="#444c56" stroke-width="1"/>
+<text x="62" y="227" font-size="12.5" fill="#e6edf3" text-anchor="start">区域</text>
+<rect x="144" y="212" width="148" height="20" rx="5" fill="#2d333b" stroke="#444c56" stroke-width="1"/>
+<text x="154" y="227" font-size="12.5" fill="#e6edf3" text-anchor="start">Workers 路由</text>
+<rect x="302" y="212" width="100" height="20" rx="5" fill="#2d333b" stroke="#444c56" stroke-width="1"/>
+<text x="312" y="227" font-size="12.5" fill="#e6edf3" text-anchor="start">编辑</text>
+<text x="580" y="227" font-size="12" fill="#768390" text-anchor="end">模板自带</text>
+<rect x="46" y="246" width="548" height="32" rx="8" fill="#22272e" stroke="#444c56" stroke-width="1"/>
+<rect x="52" y="252" width="84" height="20" rx="5" fill="#2d333b" stroke="#444c56" stroke-width="1"/>
+<text x="62" y="267" font-size="12.5" fill="#768390" text-anchor="start">...</text>
+<rect x="144" y="252" width="148" height="20" rx="5" fill="#2d333b" stroke="#444c56" stroke-width="1"/>
+<text x="154" y="267" font-size="12.5" fill="#768390" text-anchor="start">模板其余权限</text>
+<rect x="302" y="252" width="100" height="20" rx="5" fill="#2d333b" stroke="#444c56" stroke-width="1"/>
+<text x="312" y="267" font-size="12.5" fill="#768390" text-anchor="start">保持默认</text>
+<rect x="46" y="286" width="548" height="32" rx="8" fill="#f38020" fill-opacity="0.12" stroke="#f38020" stroke-width="1.2"/>
+<rect x="52" y="292" width="84" height="20" rx="5" fill="#2d333b" stroke="#444c56" stroke-width="1"/>
+<text x="62" y="307" font-size="12.5" fill="#e6edf3" text-anchor="start">账户</text>
+<rect x="144" y="292" width="148" height="20" rx="5" fill="#2d333b" stroke="#444c56" stroke-width="1"/>
+<text x="154" y="307" font-size="12.5" fill="#e6edf3" text-anchor="start">D1</text>
+<rect x="302" y="292" width="100" height="20" rx="5" fill="#2d333b" stroke="#444c56" stroke-width="1"/>
+<text x="312" y="307" font-size="12.5" fill="#e6edf3" text-anchor="start">编辑</text>
+<text x="580" y="307" font-size="12" fill="#f38020" text-anchor="end" font-weight="600">手动添加</text>
+<text x="52" y="350" font-size="13" fill="#768390" text-anchor="start" font-weight="600">账户资源</text>
+<text x="144" y="350" font-size="12.5" fill="#e6edf3" text-anchor="start">包括</text>
+<text x="192" y="350" font-size="12.5" fill="#e6edf3" text-anchor="start">你的账户</text>
+<text x="52" y="384" font-size="13" fill="#768390" text-anchor="start" font-weight="600">区域资源</text>
+<text x="144" y="384" font-size="12.5" fill="#e6edf3" text-anchor="start">包括</text>
+<text x="192" y="384" font-size="12.5" fill="#e6edf3" text-anchor="start">特定区域</text>
+<rect x="262" y="368" width="128" height="22" rx="6" fill="#22272e" stroke="#2aabee" stroke-width="1"/>
+<text x="326" y="384" font-size="12" fill="#2aabee" text-anchor="middle" class="m">example.com</text>
+<text x="52" y="418" font-size="12" fill="#768390" text-anchor="start">只在绑定自定义域名时需要指定域名所在区域, 不绑可选所有区域。</text>
+<rect x="628" y="88" width="300" height="348" rx="14" fill="#2d333b" stroke="#444c56" stroke-width="1"/>
+<text x="648" y="118" font-size="15" fill="#e6edf3" text-anchor="start" font-weight="600">权限用途与账户 ID</text>
+<circle cx="654" cy="145" r="5" fill="#f38020"/>
+<text x="668" y="150" font-size="13.5" fill="#f38020" text-anchor="start" font-weight="600">Workers 脚本</text>
+<text x="668" y="172" font-size="12.5" fill="#adbac7" text-anchor="start">部署 Worker, 写入机密</text>
+<circle cx="654" cy="201" r="5" fill="#7c8cff"/>
+<text x="668" y="206" font-size="13.5" fill="#7c8cff" text-anchor="start" font-weight="600">D1</text>
+<text x="668" y="228" font-size="12.5" fill="#adbac7" text-anchor="start">建库, 查 id, 执行迁移</text>
+<circle cx="654" cy="257" r="5" fill="#2aabee"/>
+<text x="668" y="262" font-size="13.5" fill="#2aabee" text-anchor="start" font-weight="600">Workers 路由</text>
+<text x="668" y="284" font-size="12.5" fill="#adbac7" text-anchor="start">绑定 CUSTOM_DOMAIN</text>
+<circle cx="654" cy="313" r="5" fill="#57ab5a"/>
+<text x="668" y="318" font-size="13.5" fill="#57ab5a" text-anchor="start" font-weight="600">账户 ID</text>
+<text x="668" y="340" font-size="12.5" fill="#adbac7" text-anchor="start">控制台首页右侧 Account ID</text>
+<text x="668" y="362" font-size="12.5" fill="#adbac7" text-anchor="start">存为 CLOUDFLARE_ACCOUNT_ID</text>
+<line x1="648" y1="372" x2="908" y2="372" stroke="#444c56"/>
+<text x="648" y="398" font-size="12.5" fill="#adbac7" text-anchor="start">令牌只显示一次, 立即存为仓库</text>
+<text x="648" y="420" font-size="12.5" fill="#adbac7" text-anchor="start">Secret: CLOUDFLARE_API_TOKEN</text>
+</svg>
