@@ -1,10 +1,13 @@
 // 上传队列: 逐个文件上传, 显示哈希/上传进度, 失败可重试 (已传分片不重传)
 import { Button, Progress } from '../ui';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { fmtSize } from '../lib/api';
-import { type Progress as P, uploadFile } from '../lib/transfer';
+import { ApiError, fmtSize } from '../lib/api';
+import { type Progress as P, uploadFile, type UploadOpts } from '../lib/transfer';
 
-interface Item { id: number; file: File; dir: string; p: P; error?: string }
+interface Item { id: number; file: File; dir: string; p: P; opts?: UploadOpts; error?: string; conflict?: boolean }
+
+// 同名时 "保留两者": a.png -> a (1).png
+const copyName = (n: string) => n.replace(/(\.[^.]*)?$/, (ext) => ` (${Date.now() % 1000})${ext}`);
 
 let seq = 0;
 
@@ -21,10 +24,11 @@ export function useUploadQueue(onDone: () => void) {
     for (let it = queue.current.shift(); it; it = queue.current.shift()) {
       const cur = it;
       try {
-        await uploadFile(cur.file, cur.dir, (p) => patch(cur.id, { p }));
+        await uploadFile(cur.file, cur.dir, (p) => patch(cur.id, { p }), cur.opts);
         onDone();
       } catch (e) {
-        patch(cur.id, { p: { phase: 'error', ratio: 0 }, error: (e as Error).message });
+        const conflict = e instanceof ApiError && e.status === 409;
+        patch(cur.id, { p: { phase: 'error', ratio: 0 }, conflict, error: conflict ? '已有同名文件' : (e as Error).message });
       }
     }
     running.current = false;
@@ -37,8 +41,8 @@ export function useUploadQueue(onDone: () => void) {
     void pump();
   }, [pump]);
 
-  const retry = (it: Item) => {
-    const again = { ...it, error: undefined, p: { phase: 'upload', ratio: 0 } as P };
+  const retry = (it: Item, opts?: UploadOpts) => {
+    const again = { ...it, opts: opts ?? it.opts, error: undefined, conflict: false, p: { phase: 'upload', ratio: 0 } as P };
     patch(it.id, again);
     queue.current.push(again);
     void pump();
@@ -68,7 +72,7 @@ export function UploadQueue({ q }: { q: ReturnType<typeof useUploadQueue> }) {
           {q.items.map((it) => (
             <li key={it.id} className="text-xs">
               <div className="flex justify-between gap-2">
-                <span className="truncate">{it.file.name}</span>
+                <span className="truncate">{it.opts?.name ?? it.file.name}</span>
                 <span className="shrink-0 text-muted-foreground">
                   {fmtSize(it.file.size)} · {it.p.note ?? PHASE[it.p.phase]}
                 </span>
@@ -77,7 +81,16 @@ export function UploadQueue({ q }: { q: ReturnType<typeof useUploadQueue> }) {
               {it.error && (
                 <div className="mt-1 flex items-center justify-between gap-2 text-danger-fg">
                   <span className="truncate">{it.error}</span>
-                  <Button size="xs" variant="outline" onClick={() => q.retry(it)}>重试</Button>
+                  <div className="flex shrink-0 gap-1">
+                    {it.conflict ? (
+                      <>
+                        <Button size="xs" variant="outline" onClick={() => q.retry(it, { overwrite: true })}>覆盖</Button>
+                        <Button size="xs" variant="outline" onClick={() => q.retry(it, { name: copyName(it.file.name) })}>保留两者</Button>
+                      </>
+                    ) : (
+                      <Button size="xs" variant="outline" onClick={() => q.retry(it)}>重试</Button>
+                    )}
+                  </div>
                 </div>
               )}
             </li>

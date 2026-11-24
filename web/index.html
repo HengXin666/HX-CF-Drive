@@ -1,10 +1,19 @@
 <!doctype html>
-<html lang="zh-CN" data-mode="light">
+<html lang="zh-CN" data-mode="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>HX-CF-Drive</title>
-    <link rel="icon" href="data:," />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <script>
+      // 只用暗色; 皮肤在首帧前写好, 避免闪一下默认色
+      (function () {
+        try {
+          var s = localStorage.getItem('hxd_skin');
+          if (s && s !== 'default') document.documentElement.setAttribute('data-skin', s);
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -15,3 +15,4 @@ export { PageHeader } from '@hx/ui-dist/layout/PageHeader.js';
 export { SidebarNavItemButton } from '@hx/ui-dist/layout/SidebarNav.js';
 export { StatCard, StatGrid } from '@hx/ui-dist/layout/StatCard.js';
 export { Toaster, toast } from '@hx/ui-dist/layout/Toast.js';
+export { Backdrop } from '@hx/ui-dist/effects/Backdrop.js';

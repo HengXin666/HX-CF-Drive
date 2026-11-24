@@ -1,0 +1,20 @@
+# HX-CF-Drive
+
+> 跑在 Cloudflare Workers 上的网盘, 文件切片存在 Telegram 频道, 目录树在 D1。提供 REST API, WebDAV 和签名直链。
+
+认证: `Authorization: Bearer <token>`。错误返回 `{"error":"..."}`, 429/503 按 `Retry-After` 重试。
+
+## 文档
+
+- [Agent Skill](/skill.md): 给 AI Agent 的完整使用说明, 含分片上传, 大文件下载和命令行脚本用法
+- [接口文档](/#/docs): 全部接口, 请求体, 返回值和 curl 示例
+- [源码](https://github.com/HengXin666/HX-CF-Drive)
+
+## 常用接口
+
+- `GET /api/v1/fs/list?path=/` 列目录
+- `POST /api/v1/upload?path=/dir` multipart 字段 file, 单文件 ≤ 19 MiB
+- `POST /api/v1/uploads` → `PUT /api/v1/uploads/chunk?i=&ticket=` → `POST /api/v1/uploads/commit` 大文件分片上传
+- `POST /api/v1/fs/link {"path","expiresIn":0}` 生成直链
+- `GET /api/v1/files/<id>/content` 读取, 支持 Range
+- WebDAV: `/dav/`, Basic 认证, 密码填令牌

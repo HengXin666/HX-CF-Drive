@@ -8,13 +8,16 @@ interface State { ticket: string; chunkSize: number; chunkCount: number; receipt
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export async function uploadFile(file: File, dir: string, onProgress: (p: Progress) => void, concurrency = 2): Promise<void> {
-  const key = `hxd_up:${dir}:${file.name}:${file.size}:${file.lastModified}`;
+export interface UploadOpts { name?: string; overwrite?: boolean }
+
+export async function uploadFile(file: File, dir: string, onProgress: (p: Progress) => void, opts: UploadOpts = {}, concurrency = 2): Promise<void> {
+  const name = opts.name ?? file.name;
+  const key = `hxd_up:${dir}:${name}:${file.size}:${file.lastModified}`;
   let state = JSON.parse(localStorage.getItem(key) ?? 'null') as State | null;
   if (!state) {
     const sha256 = file.size ? await sha256File(file, (r) => onProgress({ phase: 'hash', ratio: r })) : undefined;
     const init = await api<{ done: boolean; ticket: string; chunkSize: number; chunkCount: number }>('POST', '/uploads', {
-      path: dir, name: file.name, size: file.size, mime: file.type || undefined, sha256,
+      path: dir, name, size: file.size, mime: file.type || undefined, sha256, overwrite: !!opts.overwrite,
     });
     if (init.done) { onProgress({ phase: 'done', ratio: 1, note: file.size ? '秒传' : undefined }); return; }
     state = { ticket: init.ticket, chunkSize: init.chunkSize, chunkCount: init.chunkCount, receipts: {} };

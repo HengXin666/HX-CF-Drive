@@ -44,6 +44,7 @@ src/
   services/maintenance.ts    定时维护
 migrations/                  D1 表结构
 web/                         前端 (React + TS + HX-UI), 构建到 dist/web 由 Assets 直接返回
+skills/hx-cf-drive/          给 AI Agent 的 Skill 与命令行脚本
   src/lib/transfer.ts        浏览器端 sha256 秒传, 断点续传, 大文件 Range 续拉
 scripts/quota.mjs            免费额度估算 (按实测单次行数)
 scripts/meter.mjs            实测每个操作的 D1 行读写
@@ -69,9 +70,20 @@ node scripts/e2e.mjs            # 端到端冒烟
 
 ## 前端
 
-`web/` 是 React + TypeScript 前端, UI 用 [HX-UI](https://github.com/HengXin666/HX-UI)。功能: 令牌登录, 目录浏览, 拖放上传 (浏览器算 sha256 秒传, 断点续传, 进度), 图片/视频/音频/PDF 预览, 大文件分段下载, 重命名/移动/删除, 回收站, 搜索, 分享与永久直链, 后台 (统计, 频道, Bot, 令牌, 手动维护)。
+`web/` 是 React + TypeScript 前端, UI 用 [HX-UI](https://github.com/HengXin666/HX-UI), 只用暗色主题, 侧栏可切换 5 套皮肤, 图标全部为 SVG (Iconify Solar)。
 
-`npm run build:web` 构建到 `dist/web`, `wrangler deploy` 时作为静态资源上传。静态资源请求不进 Worker, 不计 Workers 请求数。HX-UI 尚未发布到 npm, 暂时以 `web/vendor/hx-ui-*.tgz` 引入。
+功能: 令牌登录, 目录浏览, 拖放上传 (浏览器算 sha256 秒传, 断点续传, 同名可覆盖或保留两者), 图片/视频/音频/PDF/文本预览, 大文件分段下载, 重命名/移动/删除, 回收站, 搜索, 分享与永久直链, 后台 (统计, 频道, Bot, 令牌, 手动维护), 接口文档页。
+
+`npm run build:web` 构建到 `dist/web`, `wrangler deploy` 时作为静态资源上传, 静态资源请求不进 Worker, 不计请求数。HX-UI 尚未发布到 npm, 暂以 `web/vendor/hx-ui-*.tgz` 引入。
+
+## 接口文档与 Agent 接入
+
+- 网页内: 侧栏 "接口文档" (`/#/docs`), 全部接口带请求体, 返回值和可复制的 curl。数据源是 `web/src/docs/endpoints.ts`。
+- `skills/hx-cf-drive/SKILL.md`: 给 AI Agent 的 Skill (Claude Code 等可直接放进 skills 目录), 部署后也发布在 `/skill.md`。
+- `skills/hx-cf-drive/scripts/hxd.mjs`: 无依赖命令行 (ls, put, get, link, share ...), 自动分片, 秒传, 429 重试, 大文件 Range 续拉。
+- `/llms.txt`: 给 LLM 的站点索引。
+
+让 Agent 接入只需一句: "读取 `https://你的域名/skill.md`, 按其中说明使用 HX-CF-Drive, BASE=..., TOKEN=<受限令牌>"。
 
 线上部署见 [docs/DEPLOY.md](docs/DEPLOY.md)。
 

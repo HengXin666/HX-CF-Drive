@@ -1,3 +1,4 @@
+import { copyFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
@@ -7,7 +8,12 @@ import { defineConfig } from 'vite';
 const API = process.env.API ?? 'http://127.0.0.1:8787';
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [
+    react(),
+    tailwindcss(),
+    // 把仓库里的 Agent Skill 发布为 /skill.md, 部署后 Agent 可以直接读
+    { name: 'copy-skill', closeBundle: () => copyFileSync(new URL('../skills/hx-cf-drive/SKILL.md', import.meta.url), new URL('../dist/web/skill.md', import.meta.url)) },
+  ],
   resolve: { alias: { '@hx/ui-dist': fileURLToPath(new URL('./node_modules/@hx/ui/dist', import.meta.url)) } },
   build: { outDir: '../dist/web', emptyOutDir: true, chunkSizeWarningLimit: 1500 },
   server: {

@@ -1,7 +1,10 @@
 // 回收站: 列出已删除的顶层节点, 可恢复 (目录连同子项)。超期由每日定时任务清理
-import { Button, DataTable, type DataTableColumn, PageHeader, toast } from '../ui';
 import { useCallback, useEffect, useState } from 'react';
+import { Icon } from '../components/Icon';
+import { Page } from '../components/Shell';
+import { fileIcon } from '../icons';
 import { fmtSize, fmtTime, fs, type Node } from '../lib/api';
+import { Button, DataTable, type DataTableColumn, toast } from '../ui';
 
 export function Trash() {
   const [rows, setRows] = useState<Node[]>([]);
@@ -18,31 +21,31 @@ export function Trash() {
   }, []);
   useEffect(() => { void load(); }, [load]);
 
+  const restore = async (n: Node) => {
+    try {
+      await fs.restore(n.id);
+      toast.success(`已恢复 ${n.name}`);
+      await load();
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  };
+
   const columns: DataTableColumn<Node>[] = [
-    { key: 'name', header: '名称', render: (n) => `${n.kind === 'dir' ? '📁' : '📄'} ${n.name}` },
-    { key: 'size', header: '大小', width: '110px', numeric: true, render: (n) => (n.kind === 'dir' ? '' : fmtSize(n.size)) },
-    { key: 'at', header: '删除时间', width: '180px', render: (n) => (n.deletedAt ? fmtTime(n.deletedAt) : '') },
-    { key: 'op', header: '', width: '80px', align: 'right', render: (n) => (
-      <Button
-        size="xs"
-        variant="outline"
-        onClick={async () => {
-          try {
-            await fs.restore(n.id);
-            toast.success(`已恢复 ${n.name}`);
-            await load();
-          } catch (e) {
-            toast.error((e as Error).message);
-          }
-        }}
-      >恢复</Button>
+    { key: 'name', header: '名称', render: (n) => {
+      const fi = fileIcon(n.kind, n.mime, n.name);
+      return <span className="flex items-center gap-2.5"><Icon raw={fi.icon} className={`size-[18px] ${fi.tone}`} />{n.name}</span>;
+    } },
+    { key: 'size', header: '大小', width: '100px', numeric: true, render: (n) => (n.kind === 'dir' ? '-' : fmtSize(n.size)) },
+    { key: 'at', header: '删除时间', width: '170px', render: (n) => <span className="text-muted-foreground tabular-nums">{n.deletedAt ? fmtTime(n.deletedAt) : ''}</span> },
+    { key: 'op', header: '', width: '90px', align: 'right', render: (n) => (
+      <Button size="xs" variant="outline" onClick={() => void restore(n)}><Icon name="restore" className="size-3.5" /> 恢复</Button>
     ) },
   ];
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3">
-      <PageHeader title="回收站" desc="删除的文件保留一段时间 (默认 7 天), 之后由每日维护任务彻底清理。" />
-      <DataTable columns={columns} rows={rows} rowKey={(n) => n.id} loading={loading} emptyText="回收站是空的" className="min-h-0 flex-1" />
-    </div>
+    <Page title="回收站" right={<span className="text-[12.5px] text-muted-foreground">保留 7 天, 之后由每日维护彻底清理</span>}>
+      <DataTable columns={columns} rows={rows} rowKey={(n) => n.id} loading={loading} emptyText="回收站是空的" />
+    </Page>
   );
 }
