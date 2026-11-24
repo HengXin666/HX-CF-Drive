@@ -58,7 +58,7 @@ v0.2 的目标只有两个: Cloudflare 各项额度尽量少用, Worker CPU 尽�
 - 请求先匹配 Assets 静态文件 (`run_worker_first = false`), 只有 `/api` `/dav` `/f` `/s` 才进 Worker。
 - Worker 用 Hono 挂载 REST, WebDAV, 签名直链和分享四组路由, 元数据读写走 D1, 文件内容走 Telegram Bot API。
 - Bot 池 x 频道池: 写入按 blob id 哈希打散到所有可写频道; Bot 失效时用另一个 Bot 转发原消息拿新 file_id。
-- 每日维护 (Bot 探活, 回收站清理, 删除孤儿分片) 默认由 GitHub Actions 调接口触发, 不占 Free 账户的 Cron 名额。
+- 每日维护 (Bot 探活, 回收站清理, 删除孤儿分片) 默认由 GitHub Actions 调接口触发, 不占 Free 账户的 Cron 名额; keepalive.yml 每周重新启用定时工作流, 防止 60 天无活动被 GitHub 自动停用。
 
 <details>
 <summary><b>目录结构</b></summary>

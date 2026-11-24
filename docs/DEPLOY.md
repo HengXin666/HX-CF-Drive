@@ -112,6 +112,8 @@ gh variable set PUBLIC_URL --body https://hx-cf-drive.<子域>.workers.dev  # �
 
 > [!NOTE]
 > **Free 账户只有 5 个 Cron 触发器**。工作流默认把 `crons` 清空, 改由 `.github/workflows/maintenance.yml` 每天 19:00 UTC (北京时间 03:00) 调 `POST /api/v1/admin/maintenance`, 做 Bot 探活, 回收站清理和孤儿分片删除。它要求 `DEPLOY_ENABLED=true` 且设置了 `PUBLIC_URL`。想改用 CF Cron, 把变量 `CF_CRON` 设为 `true`。
+>
+> 公开仓库 60 天无活动, GitHub 会自动禁用定时工作流。`.github/workflows/keepalive.yml` 每周一用 API 重新启用 maintenance.yml 和它自己, 不产生提交。
 
 > [!WARNING]
 > **Cloudflare 会对 curl, node 的默认 User-Agent 弹人机验证**, 返回一个 HTML 页面而不是 JSON。所有脚本都要带自定义 UA: 工作流用 `hx-cf-drive-ci/1`, 命令行 `hxd` 用 `hxd/1`。自己写脚本时加上 `curl -A "my-tool/1"` 或在请求头里设 `User-Agent`。
