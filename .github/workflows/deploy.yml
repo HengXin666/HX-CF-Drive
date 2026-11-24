@@ -118,8 +118,8 @@ jobs:
         run: |
           [ -n "$CHANNEL" ] || { echo "::error::缺少 TG_CHANNEL_ID"; exit 1; }
           sleep 5
-          curl -fsS -X POST -H "Authorization: Bearer $ADMIN" "$BASE/api/v1/admin/maintenance" > /dev/null
-          curl -fsS -X POST -H "Authorization: Bearer $ADMIN" -H "Content-Type: application/json" \
+          curl -fsS -A "hx-cf-drive-ci/1" -X POST -H "Authorization: Bearer $ADMIN" "$BASE/api/v1/admin/maintenance" > /dev/null
+          curl -fsS -A "hx-cf-drive-ci/1" -X POST -H "Authorization: Bearer $ADMIN" -H "Content-Type: application/json" \
             -d "{\"id\":\"$CHANNEL\"}" "$BASE/api/v1/admin/channels" | jq .
 
       - name: 冒烟
@@ -128,6 +128,6 @@ jobs:
           ADMIN: ${{ secrets.ADMIN_TOKEN }}
         run: |
           sleep 3
-          curl -fsS -o /dev/null "$BASE/"
-          curl -fsS -H "Authorization: Bearer $ADMIN" "$BASE/api/v1/admin/stats" | jq '{bots: [.bots[]? | {username, status}], channels: [.channels[]? | {id, status}]}'
+          curl -fsS -A "hx-cf-drive-ci/1" -o /dev/null "$BASE/"
+          curl -fsS -A "hx-cf-drive-ci/1" -H "Authorization: Bearer $ADMIN" "$BASE/api/v1/admin/stats" | jq '{bots: [.bots[]? | {username, status}], channels: [.channels[]? | {id, status}]}'
           echo "### 已部署: $BASE" >> "$GITHUB_STEP_SUMMARY"

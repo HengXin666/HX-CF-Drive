@@ -18,4 +18,4 @@ jobs:
           ADMIN: ${{ secrets.ADMIN_TOKEN }}
         run: |
           [ -n "$BASE" ] || { echo "::error::缺少变量 PUBLIC_URL"; exit 1; }
-          curl -fsS --retry 3 -X POST -H "Authorization: Bearer $ADMIN" "$BASE/api/v1/admin/maintenance"
+          curl -fsS -A "hx-cf-drive-ci/1" --retry 3 -X POST -H "Authorization: Bearer $ADMIN" "$BASE/api/v1/admin/maintenance"
