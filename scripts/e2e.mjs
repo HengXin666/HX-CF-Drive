@@ -6,6 +6,9 @@ const BASE = process.env.BASE ?? 'http://127.0.0.1:8787';
 const ADMIN = process.env.ADMIN ?? 'test-admin';
 const CHANNEL = process.env.CHANNEL ?? '-1001234567890';
 const H = { Authorization: `Bearer ${ADMIN}` };
+// 模拟 TG 的测试辅助接口, 线上跑时不可用, 相关断言自动跳过
+const MOCK = process.env.MOCK ?? 'http://127.0.0.1:8887';
+const mockMsgs = async () => { try { return (await (await fetch(`${MOCK}/__mock/messages?chat=${CHANNEL}`)).json()).result; } catch { return null; } };
 let pass = 0;
 const RUN = Date.now();
 const P = `/e2e-${RUN}`; // 每次运行独立目录
@@ -133,6 +136,40 @@ ok((await fetch(BASE + '/api/v1/admin/stats', { headers: { Authorization: `Beare
 const sh = await j('POST', '/api/v1/shares', { path: `${P}/video/v.mp4`, password: 'pw' });
 ok((await fetch(sh.body.url)).status === 401, '分享需要密码');
 ok(Buffer.from(await (await fetch(sh.body.url + '?p=pw')).arrayBuffer()).equals(vid), '分享下载');
+
+// 彻底删除: 单个与清空, 受限令牌隔离
+const pbuf = rand(2000);
+const pu = await chunkUpload(`${P}/purge`, 'p.bin', pbuf, 'application/octet-stream');
+const before = await mockMsgs();
+await j('POST', '/api/v1/fs/delete', { path: `${P}/purge/p.bin` });
+const pr = await j('POST', '/api/v1/fs/purge', { id: pu.node.id });
+ok(pr.status === 200 && pr.body.nodes >= 1 && typeof pr.body.more === 'number', `彻底删除 ${JSON.stringify(pr.body)}`);
+ok(!(await j('GET', '/api/v1/fs/trash')).body.items.some((x) => x.id === pu.node.id), '彻底删除后不在回收站');
+ok((await j('POST', '/api/v1/fs/restore', { id: pu.node.id })).status === 404, '彻底删除后不能恢复');
+if (before) ok((await mockMsgs()).length <= before.length - 1, 'TG 消息已用 deleteMessages 删除');
+const TK = { Authorization: `Bearer ${tk.body.token}` };
+const tj = async (m, path, body) => { const r = await fetch(BASE + path, { method: m, headers: { ...TK, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }); return { status: r.status, body: await r.json().catch(() => ({})) }; };
+const mine = await tj('POST', '/api/v1/uploads', { path: '/t', name: 'mine.bin', size: 0 });
+await tj('POST', '/api/v1/fs/delete', { id: mine.body.node.id });
+const adminFile = await j('POST', '/api/v1/uploads', { path: `${P}/keep`, name: 'keep.bin', size: 0 });
+await j('POST', '/api/v1/fs/delete', { id: adminFile.body.node.id });
+const tt = await tj('GET', '/api/v1/fs/trash');
+ok(tt.body.items.length === 1 && tt.body.items[0].id === mine.body.node.id, '受限令牌只看到自己根下的回收站');
+ok((await tj('POST', '/api/v1/fs/restore', { id: adminFile.body.node.id })).status === 403, '受限令牌不能恢复别处的项目');
+ok((await tj('POST', '/api/v1/fs/purge', { id: adminFile.body.node.id })).status === 403, '受限令牌不能彻底删除别处的项目');
+ok((await tj('POST', '/api/v1/fs/trash/empty')).status === 200 && (await tj('GET', '/api/v1/fs/trash')).body.items.length === 0, '受限令牌清空自己的回收站');
+ok((await j('GET', '/api/v1/fs/trash')).body.items.some((x) => x.id === adminFile.body.node.id), '别处的回收站项目不受影响');
+const mt = await j('POST', '/api/v1/admin/maintenance');
+ok(mt.status === 200 && 'more' in mt.body && 'leftBlobs' in mt.body, `维护返回剩余量 ${JSON.stringify(mt.body)}`);
+
+// #8 秒传: 受限令牌不能凭哈希挂上别处的文件
+const steal = await tj('POST', '/api/v1/uploads', { path: '/s', name: 'steal.bin', size: big.length, sha256: sha(big) });
+ok(steal.status === 200 && steal.body.done === false, '受限令牌不能秒传根目录外的文件');
+
+// #11 令牌只认请求头, 500 不泄漏, 非法 JSON 400
+ok((await fetch(`${BASE}/api/v1/fs/list?path=/&token=${encodeURIComponent(ADMIN)}`)).status === 401, 'URL 里的令牌不被接受');
+const badJson = await fetch(`${BASE}/api/v1/fs/mkdir`, { method: 'POST', headers: { ...H, 'Content-Type': 'application/json' }, body: '{oops' });
+ok(badJson.status === 400, '非法 JSON 返回 400');
 
 const stats = await j('GET', '/api/v1/admin/stats');
 console.log('stats', JSON.stringify(stats.body.blobs));

@@ -42,6 +42,16 @@ async function put(file, dir = '/') {
   if (init.done) return { ...init, instant: true };
   const fh = await open(file, 'r');
   const receipts = new Array(init.chunkCount);
+  // 多于 256 片时, 每凑满一组 (按 256 对齐) 就换成聚合回执, commit 不用一次验几千个签名
+  const PART = 256, groups = Math.ceil(init.chunkCount / PART), folds = [];
+  const tryFold = async (g) => {
+    if (groups <= 1 || folds[g]) return;
+    const rs = receipts.slice(g * PART, Math.min((g + 1) * PART, init.chunkCount));
+    if (rs.length !== Math.min(PART, init.chunkCount - g * PART) || rs.some((r) => !r)) return;
+    folds[g] = 'pending';
+    folds[g] = (await req('POST', '/api/v1/uploads/fold', { ticket: init.ticket, receipts: rs })).fold;
+    for (let i = g * PART; i < g * PART + rs.length; i++) receipts[i] = undefined;
+  };
   const todo = [...Array(init.chunkCount).keys()];
   const worker = async () => {
     for (let i = todo.shift(); i !== undefined; i = todo.shift()) {
@@ -50,11 +60,12 @@ async function put(file, dir = '/') {
       await fh.read(buf, 0, len, i * init.chunkSize);
       receipts[i] = (await req('PUT', `/api/v1/uploads/chunk?i=${i}&ticket=${encodeURIComponent(init.ticket)}`, undefined, buf)).receipt;
       process.stderr.write(`chunk ${i + 1}/${init.chunkCount}\n`);
+      await tryFold(Math.floor(i / PART));
     }
   };
   await Promise.all([worker(), worker()]);
   await fh.close();
-  return req('POST', '/api/v1/uploads/commit', { ticket: init.ticket, receipts });
+  return req('POST', '/api/v1/uploads/commit', { ticket: init.ticket, receipts: receipts.filter(Boolean), folds: folds.filter(Boolean) });
 }
 
 async function get(path, out) {

@@ -68,7 +68,7 @@ Fork [HengXin666/HX-CF-Drive](https://github.com/HengXin666/HX-CF-Drive) 到自�
 | Variable | `CUSTOM_DOMAIN` | 否 | 绑定的自定义域名, 如 `drive.example.com`, 需托管在同一 CF 账户 |
 | Variable | `PUBLIC_URL` | 否 | 服务的公开地址; 冒烟, 初始化和每日维护都走这个地址, 启用每日维护时必填 |
 | Variable | `D1_NAME` | 否 | D1 库名, 默认 `hx-cf-drive` |
-| Variable | `CF_CRON` | 否 | 设为 `true` 才用 CF Cron 做每日维护; 默认由 maintenance.yml 每天调接口 |
+| Variable | `CF_CRON` | 否 | 设为 `true` 才用 CF Cron 做定时维护; 默认由 maintenance.yml 每 6 小时调接口 |
 
 也可以用 gh 命令行设置:
 
@@ -108,10 +108,13 @@ gh variable set PUBLIC_URL --body https://hx-cf-drive.<子域>.workers.dev  # �
 
 打开部署地址, 在登录页输入 **`ADMIN_TOKEN`** 即可进入。日常使用和接入第三方工具时, 建议在后台 "令牌" 页另建受限 API 令牌 (登录页同样接受), 不要把管理员令牌到处分发。
 
+> [!IMPORTANT]
+> 本次升级加了迁移 `0002_channel_sweep.sql` (`channels.sweep` 列) 和 `0003_blob_parts.sql` (分段清单表)。部署工作流会自动执行 `d1 migrations apply`; 手动部署记得先跑 `npm run db:migrate`。
+
 ## 6. 已知的坑
 
 > [!NOTE]
-> **Free 账户只有 5 个 Cron 触发器**。工作流默认把 `crons` 清空, 改由 `.github/workflows/maintenance.yml` 每天 19:00 UTC (北京时间 03:00) 调 `POST /api/v1/admin/maintenance`, 做 Bot 探活, 回收站清理和孤儿分片删除。它要求 `DEPLOY_ENABLED=true` 且设置了 `PUBLIC_URL`。想改用 CF Cron, 把变量 `CF_CRON` 设为 `true`。
+> **Free 账户只有 5 个 Cron 触发器**。工作流默认把 `crons` 清空, 改由 `.github/workflows/maintenance.yml` 每 6 小时调 `POST /api/v1/admin/maintenance`, 做 Bot 探活, 回收站清理, 孤儿分片删除和放弃上传的消息清扫; 返回 `more=1` 时接着调, 最多 20 次。间隔不能超过 48 小时 (TG 只允许 Bot 删除 48 小时内的消息)。它要求 `DEPLOY_ENABLED=true` 且设置了 `PUBLIC_URL`。想改用 CF Cron, 把变量 `CF_CRON` 设为 `true`。
 >
 > 公开仓库 60 天无活动, GitHub 会自动禁用定时工作流。`.github/workflows/keepalive.yml` 每周一用 API 重新启用 maintenance.yml 和它自己, 不产生提交。
 

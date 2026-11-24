@@ -1,4 +1,6 @@
 // 后端接口封装。令牌存在 localStorage, 所有请求带 Bearer
+export interface PurgeResult { nodes: number; blobs: number; more: number; leftNodes: number; leftBlobs: number }
+
 export interface Node {
   id: string;
   name: string;
@@ -43,6 +45,9 @@ export const fs = {
   remove: (id: string) => api('POST', '/fs/delete', { id }),
   trash: () => api<{ items: Node[] }>('GET', '/fs/trash'),
   restore: (id: string) => api('POST', '/fs/restore', { id }),
+  /** 彻底删除一个回收站项目。more=1 表示还有积压, 由定时维护接着清 */
+  purge: (id: string) => api<PurgeResult>('POST', '/fs/purge', { id }),
+  emptyTrash: () => api<PurgeResult>('POST', '/fs/trash/empty'),
   search: (q: string) => api<{ items: Node[] }>('GET', `/fs/search?q=${encodeURIComponent(q)}`),
   link: (id: string, expiresIn = 0) => api<{ url: string }>('POST', '/fs/link', { id, expiresIn }),
 };

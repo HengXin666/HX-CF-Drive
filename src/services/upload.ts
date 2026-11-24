@@ -2,7 +2,8 @@
  * 无状态分片上传: init → chunk × N → commit
  * - init: 校验 + 秒传判断, 返回签名的上传凭证。D1 只读不写
  * - chunk: 请求体流式转发给 TG, 返回签名的分片回执。D1 零读写
- * - commit: 验签所有回执, 一次批量写入 blob + node (约 4 行, 含索引)
+ * - fold (可选, 大文件): 每凑满一组 PART_SIZE 片, 把回执换成一个签名的聚合回执, 分摊 commit 的验签 CPU
+ * - commit: 验签回执和聚合回执, 一次批量写入 blob + node (约 4 行, 含索引); 超过 PART_SIZE 片时清单拆进 blob_parts
  * 上传进度由客户端保存回执来记录, 断点续传只需重传缺的分片。
  */
 import type { Env, Principal } from '../env';
@@ -25,6 +26,16 @@ export interface Ticket {
 
 interface Receipt extends ChunkRef { id: string; i: number }
 
+/** 聚合回执: 第 g 组 (分片 [g*PART_SIZE, ...)) 的清单 JSON 文本, 验签后不用解析 */
+interface Fold { id: string; g: number; r: string }
+
+/** 分段大小: 一组/一段 256 片 (约 4.75 GiB), 每段清单约 36 KB */
+export const PART_SIZE = 256;
+
+export function partCountOf(chunkCount: number): number {
+  return Math.ceil(chunkCount / PART_SIZE);
+}
+
 export interface InitInput {
   parentId: string;
   /** 调用方已解析并校验过权限的父目录, 传了就省两次查询 */
@@ -42,6 +53,7 @@ export type InitResult =
 
 const TICKET = 'up';
 const RECEIPT = 'rc';
+const FOLD = 'fd';
 
 export function chunkCountOf(size: number, chunkSize: number): number {
   return Math.max(1, Math.ceil(size / chunkSize));
@@ -71,9 +83,12 @@ export async function initUpload(env: Env, p: Principal, inp: InitInput): Promis
     return { done: true, node: await linkNode(env, parent.id, inp.name, 0, mime, 'empty', existing) };
   }
 
+  // 受限令牌 (根目录不是 /) 只能秒传自己看得见的 blob, 自己上传的 blob 也不登记哈希, 见 #8
+  const restricted = p.rootId !== 'root';
   if (sha) {
-    const blob = await env.DB.prepare('SELECT id FROM blobs WHERE sha256 = ? AND size = ?').bind(sha, inp.size).first<{ id: string }>();
-    if (blob) {
+    // ref_count > 0: 引用归零的 blob 可能正在被清理, 不能再挂上
+    const blob = await env.DB.prepare('SELECT id FROM blobs WHERE sha256 = ? AND size = ? AND ref_count > 0').bind(sha, inp.size).first<{ id: string }>();
+    if (blob && (!restricted || (await blobVisible(env, p.rootId, blob.id)))) {
       const node = await linkNode(env, parent.id, inp.name, inp.size, mime, blob.id, existing);
       return { done: true, node };
     }
@@ -84,10 +99,30 @@ export async function initUpload(env: Env, p: Principal, inp: InitInput): Promis
   const chunkSize = chunkSizeOf(env);
   const blobId = newId(20);
   const t: Ticket = {
-    u: p.id, p: parent.id, n: inp.name, z: inp.size, t: mime, h: sha, o: inp.overwrite ? 1 : 0,
+    u: p.id, p: parent.id, n: inp.name, z: inp.size, t: mime, h: restricted ? null : sha, o: inp.overwrite ? 1 : 0,
     id: blobId, k: chunkSize, c: pickChannel(channels, blobId), x: Math.floor(now() / 1000) + 24 * 3600,
   };
   return { done: false, ticket: await sealJson(env.SIGNING_KEY, TICKET, t), chunkSize, chunkCount: chunkCountOf(inp.size, chunkSize) };
+}
+
+/** 秒传时可见子树的上限: 超过按不可见处理, 走正常上传 */
+const VISIBLE_SCAN_LIMIT = 5000;
+
+/**
+ * blob 是否已被 rootId 子树内未删除的节点引用。
+ * 向下递归只走未删除的子项 (命中 idx_nodes_parent_name 部分索引), 最多 VISIBLE_SCAN_LIMIT 行。
+ */
+export async function blobVisible(env: Env, rootId: string, blobId: string): Promise<boolean> {
+  const r = await env.DB.prepare(
+    `WITH RECURSIVE sub(id, blob_id) AS (
+       SELECT id, blob_id FROM nodes WHERE id = ?1 AND deleted_at IS NULL
+       UNION ALL
+       SELECT n.id, n.blob_id FROM nodes n JOIN sub ON n.parent_id = sub.id WHERE n.deleted_at IS NULL
+       LIMIT ${VISIBLE_SCAN_LIMIT}
+     ) SELECT COUNT(*) AS total, SUM(blob_id = ?2) AS hit FROM sub`,
+  ).bind(rootId, blobId).first<{ total: number; hit: number | null }>();
+  if (!r || r.total >= VISIBLE_SCAN_LIMIT) return false;
+  return (r.hit ?? 0) > 0;
 }
 
 export async function openTicket(env: Env, p: Principal, sealed: string): Promise<Ticket> {
@@ -124,28 +159,78 @@ export async function putChunk(env: Env, t: Ticket, idx: number, body: ReadableS
       throw new HttpError(503, 'bot revoked, retry', { 'Retry-After': '1' });
     }
     coolDown(bot.id, 30_000);
-    throw new HttpError(502, `telegram upload failed: ${(e as Error).message}`);
+    // 上游原始错误只记日志
+    console.error('telegram upload failed', bot.id, e);
+    throw new HttpError(502, 'telegram upload failed, retry', { 'Retry-After': '5' });
   }
 }
 
-/** 验签全部回执, 写入 blob + node。回执不全时返回缺失的分片号 */
-export async function commitUpload(env: Env, t: Ticket, receipts: string[]): Promise<NodeRow> {
+/**
+ * 把一组回执折叠成聚合回执 (#12)。必须是完整的一组: 第 g 组的全部分片, 最后一组可以不足 PART_SIZE。
+ * 每次只验一组 (最多 256 次 HMAC), 把 commit 的 CPU 摊到上传过程中。
+ */
+export async function foldReceipts(env: Env, t: Ticket, receipts: string[]): Promise<string> {
   const count = chunkCountOf(t.z, t.k);
-  const refs: (ChunkRef | undefined)[] = new Array(count);
+  if (!Array.isArray(receipts) || !receipts.length || receipts.length > PART_SIZE) throw new HttpError(400, 'fold needs 1..256 receipts');
+  let g = -1;
+  const refs: (ChunkRef | undefined)[] = [];
   for (const s of receipts) {
     const r = await openJson<Receipt>(env.SIGNING_KEY, RECEIPT, s);
     if (!r || r.id !== t.id || r.i < 0 || r.i >= count) throw new HttpError(400, 'bad receipt');
-    refs[r.i] = { c: r.c, m: r.m, b: r.b, f: r.f, s: r.s };
+    const rg = Math.floor(r.i / PART_SIZE);
+    if (g === -1) g = rg;
+    if (rg !== g) throw new HttpError(400, 'receipts span more than one group');
+    refs[r.i - g * PART_SIZE] = { c: r.c, m: r.m, b: r.b, f: r.f, s: r.s };
+  }
+  const size = Math.min(PART_SIZE, count - g * PART_SIZE);
+  const missing: number[] = [];
+  for (let i = 0; i < size && missing.length < 50; i++) if (!refs[i]) missing.push(g * PART_SIZE + i);
+  if (missing.length) throw new HttpError(400, `missing chunks: ${missing.join(',')}`);
+  const f: Fold = { id: t.id, g, r: JSON.stringify(refs.slice(0, size)) };
+  return sealJson(env.SIGNING_KEY, FOLD, f);
+}
+
+/**
+ * 验签回执和聚合回执, 写入 blob + node。回执不全时返回缺失的分片号。
+ * 聚合回执只验一次 HMAC, 不解析里面的清单; 零散回执按组拼成清单文本。
+ */
+export async function commitUpload(env: Env, t: Ticket, receipts: string[], folds: string[] = []): Promise<NodeRow> {
+  const count = chunkCountOf(t.z, t.k);
+  const parts = partCountOf(count);
+  const texts: (string | undefined)[] = new Array(parts);
+  for (const s of folds) {
+    const f = await openJson<Fold>(env.SIGNING_KEY, FOLD, s);
+    if (!f || f.id !== t.id || !Number.isInteger(f.g) || f.g < 0 || f.g >= parts) throw new HttpError(400, 'bad fold');
+    texts[f.g] = f.r;
+  }
+  const loose = new Map<number, (ChunkRef | undefined)[]>();
+  for (const s of receipts) {
+    const r = await openJson<Receipt>(env.SIGNING_KEY, RECEIPT, s);
+    if (!r || r.id !== t.id || r.i < 0 || r.i >= count) throw new HttpError(400, 'bad receipt');
+    const g = Math.floor(r.i / PART_SIZE);
+    if (texts[g] !== undefined) continue; // 这一组已经折叠过
+    let l = loose.get(g);
+    if (!l) loose.set(g, (l = []));
+    l[r.i - g * PART_SIZE] = { c: r.c, m: r.m, b: r.b, f: r.f, s: r.s };
   }
   const missing: number[] = [];
-  for (let i = 0; i < count && missing.length < 50; i++) if (!refs[i]) missing.push(i);
+  for (let g = 0; g < parts && missing.length < 50; g++) {
+    if (texts[g] !== undefined) continue;
+    const l = loose.get(g) ?? [];
+    const size = Math.min(PART_SIZE, count - g * PART_SIZE);
+    for (let i = 0; i < size && missing.length < 50; i++) if (!l[i]) missing.push(g * PART_SIZE + i);
+    if (!missing.length) texts[g] = JSON.stringify(l.slice(0, size));
+  }
   if (missing.length) throw new HttpError(400, `missing chunks: ${missing.join(',')}`);
 
   const existing = await childByName(env, t.p, t.n);
   if (existing && (existing.kind === 'dir' || !t.o)) throw new HttpError(409, 'target exists');
   if (existing) await trashNode(env, existing.id);
 
-  const manifest = JSON.stringify(refs);
+  // ≤ 1 段: 清单一行, 和以前一样; 多段: blobs.manifest 只存段数, 每段一行进 blob_parts
+  const manifest = parts === 1 ? (texts[0] as string) : JSON.stringify({ parts });
+  const partStmts = parts === 1 ? [] : texts.map((txt, g) =>
+    env.DB.prepare('INSERT INTO blob_parts (blob_id, idx, refs) VALUES (?, ?, ?)').bind(t.id, g, txt as string));
   const id = newId();
   const ts = now();
   const nodeStmt = env.DB.prepare(
@@ -153,11 +238,11 @@ export async function commitUpload(env: Env, t: Ticket, receipts: string[]): Pro
 ).bind(id, t.p, t.n, t.z, t.t, t.id, ts, ts);
   const blobSql = 'INSERT INTO blobs (id, size, sha256, chunk_size, manifest, ref_count, created_at) VALUES (?, ?, ?, ?, ?, 1, ?)';
   try {
-    await env.DB.batch([env.DB.prepare(blobSql).bind(t.id, t.z, t.h, t.k, manifest, ts), nodeStmt]);
+    await env.DB.batch([env.DB.prepare(blobSql).bind(t.id, t.z, t.h, t.k, manifest, ts), ...partStmts, nodeStmt]);
   } catch (e) {
     // 并发上传了同一内容, 撞了哈希唯一索引: 放弃哈希, 照样可用
     if (!t.h || !/UNIQUE/i.test(String(e))) throw e;
-    await env.DB.batch([env.DB.prepare(blobSql).bind(t.id, t.z, null, t.k, manifest, ts), nodeStmt]);
+    await env.DB.batch([env.DB.prepare(blobSql).bind(t.id, t.z, null, t.k, manifest, ts), ...partStmts, nodeStmt]);
   }
   return { id, parent_id: t.p, name: t.n, kind: 'file', size: t.z, mime: t.t, blob_id: t.id, created_at: ts, updated_at: ts, deleted_at: null };
 }

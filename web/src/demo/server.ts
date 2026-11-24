@@ -2,7 +2,7 @@
 import { delData, getData, newId, now, putData, save, sha256Hex, state } from './db';
 import { BASE, fileLink, json, serveNode, servePublicFile, serveShare, shareLink } from './serve';
 import {
-  children, claimName, copy, getNode, HttpError, insert, maintenance, mkdirp, move, pathOf, publicNode, resolvePath, restore, ROOT, trash, trashList,
+  children, claimName, copy, getNode, HttpError, insert, maintenance, mkdirp, move, pathOf, publicNode, purge, resolvePath, restore, ROOT, trash, trashList,
 } from './tree';
 
 type Scope = 'read' | 'write' | 'admin';
@@ -66,6 +66,14 @@ on('POST', '/fs/restore', 'write', async (c) => {
   restore(String((await c.body()).id ?? ''));
   return json(200, { ok: true });
 });
+
+on('POST', '/fs/purge', 'write', async (c) => {
+  const id = String((await c.body()).id ?? '');
+  if (!trashList().some((n) => n.id === id)) throw new HttpError(404, 'not in trash');
+  return json(200, await purge([id]));
+});
+
+on('POST', '/fs/trash/empty', 'write', async () => json(200, await purge(null)));
 
 on('GET', '/fs/search', 'read', ({ url }) => {
   const q = (url.searchParams.get('q') ?? '').trim().toLowerCase();
@@ -138,11 +146,26 @@ on('PUT', '/uploads/chunk', 'write', async ({ req, url }) => {
   return json(200, { receipt: `${t.ticket}.${i}.${data.size}` });
 });
 
+// 分批提交: 演示站里聚合回执就是 "f.<组号>.<片号,片号...>"
+on('POST', '/uploads/fold', 'write', async (c) => {
+  const b = await c.body();
+  const t = state().tickets[String(b.ticket ?? '')];
+  if (!t) throw new HttpError(403, 'bad ticket');
+  const idx = (Array.isArray(b.receipts) ? b.receipts : []).map((r) => Number(String(r).split('.')[1]));
+  const groups = new Set(idx.map((i) => Math.floor(i / 256)));
+  if (groups.size !== 1) throw new HttpError(400, 'receipts span more than one group');
+  const g = [...groups][0];
+  const size = Math.min(256, t.chunkCount - g * 256);
+  if (new Set(idx).size !== size) throw new HttpError(400, 'missing chunks in group');
+  return json(200, { fold: `f.${g}.${idx.join(',')}` });
+});
+
 on('POST', '/uploads/commit', 'write', async (c) => {
   const b = await c.body();
   const t = state().tickets[String(b.ticket ?? '')];
   if (!t) throw new HttpError(403, 'bad ticket');
-  const got = new Set((Array.isArray(b.receipts) ? b.receipts : []).map((r) => Number(String(r).split('.')[1])));
+  const folded = (Array.isArray(b.folds) ? b.folds : []).flatMap((f) => String(f).split('.')[2]?.split(',').map(Number) ?? []);
+  const got = new Set([...folded, ...(Array.isArray(b.receipts) ? b.receipts : []).map((r) => Number(String(r).split('.')[1]))]);
   const missing = Array.from({ length: t.chunkCount }, (_, i) => i).filter((i) => !got.has(i));
   if (missing.length) throw new HttpError(400, `missing chunks: ${missing.join(',')}`);
   const parts: Blob[] = [];
@@ -272,8 +295,8 @@ on('POST', '/admin/maintenance', 'admin', async () => json(200, await maintenanc
 // ---------------- 入口 ----------------
 
 /** 任意非空令牌都能进; 后台签发的令牌按它自己的权限 */
-function scopesOf(req: Request, url: URL): Scope[] {
-  const tok = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '') || url.searchParams.get('token') || '';
+function scopesOf(req: Request, _url: URL): Scope[] {
+  const tok = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '') || '';
   if (!tok) throw new HttpError(401, 'unauthorized');
   const t = state().tokens.find((x) => x.token === tok);
   if (t?.expires_at && t.expires_at < now()) throw new HttpError(401, 'unauthorized');

@@ -1,17 +1,18 @@
 /** REST API v1。所有接口需要 Authorization: Bearer <token> */
 import { Hono, type Context } from 'hono';
 import type { AppEnv, Env } from '../env';
-import { num } from '../env';
+import { num, publicOrigin } from '../env';
 import { activeChannels, allBots, invalidateBotCache, invalidateChannelCache, tgCall } from '../drivers/tg';
 import { requireScope } from '../lib/auth';
 import { signLink } from '../lib/sign';
 import {
-  assertAccess, getNode, getNodeCached, isWithin, listChildren, mkdirp, moveNode, type NodeRow, pathFor, pathOf, pathsOf, publicNode, resolvePath, restoreNode, trashNode,
+  assertAccess, getNode, getNodeCached, listChildren, mkdirp, moveNode, type NodeRow, pathFor, pathsOf, publicNode, resolvePath, trashNode,
 } from '../lib/tree';
 import { HttpError, newId, now, sha256Hex } from '../lib/util';
 import { runMaintenance } from '../services/maintenance';
 import { serveNode } from '../services/serve';
-import { commitUpload, initUpload, openTicket, putChunk, uploadStream } from '../services/upload';
+import { commitUpload, foldReceipts, initUpload, openTicket, putChunk, uploadStream } from '../services/upload';
+import { trash } from './trash';
 
 export const api = new Hono<AppEnv>();
 
@@ -102,20 +103,8 @@ api.post('/fs/delete', requireScope('write'), async (c) => {
   return c.json({ trashed: n });
 });
 
-api.get('/fs/trash', requireScope('write'), async (c) => {
-  const r = await c.env.DB.prepare(
-    `SELECT n.* FROM nodes n LEFT JOIN nodes p ON p.id = n.parent_id
-     WHERE n.deleted_at IS NOT NULL AND (p.deleted_at IS NULL OR p.deleted_at <> n.deleted_at)
-     ORDER BY n.deleted_at DESC LIMIT 200`,
-).all<NodeRow>();
-  return c.json({ items: r.results.map((n) => ({ ...publicNode(n), deletedAt: n.deleted_at })) });
-});
-
-api.post('/fs/restore', requireScope('write'), async (c) => {
-  const { id } = await c.req.json<{ id: string }>();
-  await restoreNode(c.env, id);
-  return c.json({ ok: true });
-});
+// 回收站: 列表, 恢复, 彻底删除, 清空
+api.route('/fs', trash);
 
 /** 模糊搜索会扫全表 (读行数 ≈ 文件总数), 按令牌限频。计数在 isolate 内存里, 不耗额度 */
 const searchHits = new Map<string, number[]>();
@@ -154,7 +143,7 @@ api.post('/fs/link', requireScope('read'), async (c) => {
   const b = await c.req.json<{ id?: string; path?: string; expiresIn?: number }>();
   const node = await locate(c, b.id, b.path);
   if (node.kind !== 'file') throw new HttpError(400, 'not a file');
-  return c.json({ url: await fileLink(c.env, new URL(c.req.url).origin, node, b.expiresIn ?? 0) });
+  return c.json({ url: await fileLink(c.env, publicOrigin(c.env, c.req.url), node, b.expiresIn ?? 0) });
 });
 
 // ---------------- 读取内容 ----------------
@@ -177,7 +166,7 @@ api.post('/uploads', requireScope('write'), async (c) => {
   else if (b.mkdirs !== false) parent = await mkdirp(c.env, p.rootId, b.path ?? '/');
   else parent = await locate(c, null, b.path ?? '/');
   const r = await initUpload(c.env, p, { parentId: parent.id, parent, name: b.name, size: b.size, mime: b.mime, sha256: b.sha256, overwrite: b.overwrite });
-  if (r.done) return c.json({ done: true, node: publicNode(r.node), url: await fileLink(c.env, new URL(c.req.url).origin, r.node) });
+  if (r.done) return c.json({ done: true, node: publicNode(r.node), url: await fileLink(c.env, publicOrigin(c.env, c.req.url), r.node) });
   return c.json(r);
 });
 
@@ -190,12 +179,22 @@ api.put('/uploads/chunk', requireScope('write'), async (c) => {
   return c.json({ receipt });
 });
 
-/** 第 3 步: 提交全部回执 { ticket, receipts: [...] } */
-api.post('/uploads/commit', requireScope('write'), async (c) => {
+/**
+ * 可选: 大文件每凑满一组 256 片 (按 256 对齐, 最后一组可以不足), 把这组回执换成一个聚合回执 { ticket, receipts } → { fold }。
+ * commit 时交聚合回执, 验签只要一次 HMAC, 避免几千片在一次请求里验签超时。
+ */
+api.post('/uploads/fold', requireScope('write'), async (c) => {
   const b = await c.req.json<{ ticket: string; receipts: string[] }>();
   const t = await openTicket(c.env, c.get('principal'), b.ticket);
-  const node = await commitUpload(c.env, t, b.receipts ?? []);
-  return c.json({ node: publicNode(node), url: await fileLink(c.env, new URL(c.req.url).origin, node) });
+  return c.json({ fold: await foldReceipts(c.env, t, b.receipts ?? []) });
+});
+
+/** 第 3 步: 提交 { ticket, receipts: [...], folds?: [...] }。folds 覆盖的组不需要再给零散回执 */
+api.post('/uploads/commit', requireScope('write'), async (c) => {
+  const b = await c.req.json<{ ticket: string; receipts?: string[]; folds?: string[] }>();
+  const t = await openTicket(c.env, c.get('principal'), b.ticket);
+  const node = await commitUpload(c.env, t, b.receipts ?? [], b.folds ?? []);
+  return c.json({ node: publicNode(node), url: await fileLink(c.env, publicOrigin(c.env, c.req.url), node) });
 });
 
 /**
@@ -205,7 +204,7 @@ api.post('/uploads/commit', requireScope('write'), async (c) => {
  */
 api.post('/upload', requireScope('write'), async (c) => {
   const p = c.get('principal');
-  const origin = new URL(c.req.url).origin;
+  const origin = publicOrigin(c.env, c.req.url);
   const path = c.req.query('path') ?? '/';
   const ct = c.req.header('Content-Type') ?? '';
   const overwrite = c.req.query('overwrite') === '1';
@@ -247,7 +246,7 @@ api.post('/shares', requireScope('read'), async (c) => {
   await c.env.DB.prepare('INSERT INTO shares (id, node_id, password_hash, expires_at, created_at) VALUES (?, ?, ?, ?, ?)')
     .bind(id, node.id, b.password ? await sha256Hex(`${id}:${b.password}`): null, b.expiresIn ? now() + b.expiresIn * 1000 : null, now())
     .run();
-  return c.json({ id, url: `${new URL(c.req.url).origin}/s/${id}` });
+  return c.json({ id, url: `${publicOrigin(c.env, c.req.url)}/s/${id}` });
 });
 
 api.get('/shares', requireScope('read'), async (c) => {
@@ -350,6 +349,6 @@ api.delete('/admin/tokens/:id', requireScope('admin'), async (c) => {
   return c.json({ ok: true });
 });
 
-api.post('/admin/maintenance', requireScope('admin'), async (c) => c.json(await runMaintenance(c.env)));
+api.post('/admin/maintenance', requireScope('admin'), async (c) => c.json(await runMaintenance(c.env, { sweep: c.req.query('sweep') !== '0' })));
 
 

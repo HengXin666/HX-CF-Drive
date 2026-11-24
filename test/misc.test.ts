@@ -92,3 +92,63 @@ describe('流切片', () => {
     expect([...bytes]).toEqual([3, 4, 5, 6, 7, 8]);
   });
 });
+
+import { extractToken } from '../src/lib/auth';
+import { parseSweep, pickTarget, SAFE_AGE } from '../src/services/sweep';
+import { publicOrigin } from '../src/env';
+
+describe('令牌提取 (#11)', () => {
+  it('只认 Authorization, 不认 ?token=', () => {
+    expect(extractToken(new Request('https://x/api?token=abc'))).toBeNull();
+    expect(extractToken(new Request('https://x/api', { headers: { Authorization: 'Bearer abc' } }))).toBe('abc');
+    expect(extractToken(new Request('https://x/dav', { headers: { Authorization: `Basic ${btoa('u:pw')}` } }))).toBe('pw');
+  });
+});
+
+describe('对外地址 (#10)', () => {
+  it('PUBLIC_URL 优先, 否则用请求 origin', () => {
+    expect(publicOrigin({ PUBLIC_URL: 'https://d.example.com/' } as never, 'https://drive/api')).toBe('https://d.example.com');
+    expect(publicOrigin({} as never, 'https://a.workers.dev/api/v1/x')).toBe('https://a.workers.dev');
+  });
+});
+
+describe('孤儿清扫水位 (#7)', () => {
+  it('只取足够旧的最新水位', () => {
+    const t = 100 * 3600_000;
+    const sw = { s: 10, t: 0, k: [[20, t - SAFE_AGE - 10], [30, t - SAFE_AGE], [40, t - 1000]] as [number, number][] };
+    expect(pickTarget(sw, t)).toBe(30);
+    expect(pickTarget({ ...sw, s: 30 }, t)).toBeNull();
+  });
+  it('坏 JSON 视为未初始化', () => {
+    expect(parseSweep(null)).toBeNull();
+    expect(parseSweep('x')).toBeNull();
+    expect(parseSweep('{"s":5,"t":1,"k":[]}')?.s).toBe(5);
+  });
+});
+
+import { foldReceipts, PART_SIZE, type Ticket } from '../src/services/upload';
+import { parseManifest } from '../src/services/serve';
+
+describe('分批提交 (#12)', () => {
+  const env = { SIGNING_KEY: 'k' } as never;
+  const t: Ticket = { u: 'a', p: 'root', n: 'x', z: 300 * 10, t: 'x', h: null, o: 0, id: 'B', k: 10, c: '-100', x: 9e9 };
+  const rc = (i: number) => sealJson('k', 'rc', { id: 'B', i, c: '-100', m: 1000 + i, b: '1', f: 'f' + i, s: 10 });
+  it('完整一组可以折叠, 跨组或缺片被拒', async () => {
+    const g0 = await Promise.all(Array.from({ length: PART_SIZE }, (_, i) => rc(i)));
+    const fold = await foldReceipts(env, t, g0);
+    const f = await openJson<{ g: number; r: string }>('k', 'fd', fold);
+    expect(f?.g).toBe(0);
+    expect(JSON.parse(f!.r)).toHaveLength(PART_SIZE);
+    await expect(foldReceipts(env, t, g0.slice(1))).rejects.toThrow(/missing/);
+    await expect(foldReceipts(env, t, [...g0.slice(200), await rc(256)])).rejects.toThrow();
+    // 最后一组不足 256 片
+    const g1 = await Promise.all(Array.from({ length: 44 }, (_, i) => rc(256 + i)));
+    const f1 = await openJson<{ g: number; r: string }>('k', 'fd', await foldReceipts(env, t, g1));
+    expect(f1?.g).toBe(1);
+    expect(JSON.parse(f1!.r)[0].m).toBe(1256);
+  });
+  it('清单格式', () => {
+    expect(parseManifest('[{"c":"1","m":2,"b":"3","f":"4","s":5}]').parts).toBe(0);
+    expect(parseManifest('{"parts":3}')).toEqual({ parts: 3, refs: [] });
+  });
+});

@@ -206,7 +206,10 @@ export async function fetchChunkRange(bot: BotRow, fileId: string, from: number,
   const whole = from === 0 && to === fullSize - 1;
   const res = await fetch(`${API}/file/bot${bot.token}/${path}`, whole ? {} : { headers: { Range: `bytes=${from}-${to}` } });
   if (res.status === 401 || res.status === 403) throw new TgFatal(`file fetch ${res.status}`);
-  if (!res.ok || !res.body) throw new HttpError(502, `telegram file fetch ${res.status}`);
+  if (!res.ok || !res.body) {
+    console.error('telegram file fetch', res.status);
+    throw new HttpError(502, 'telegram file fetch failed');
+  }
   if (whole || res.status === 206) return res.body;
   // 服务端不支持 Range 时手动裁剪
   return res.body.pipeThrough(sliceStream(from, to - from + 1));
@@ -233,6 +236,24 @@ export async function deleteMessage(bot: BotRow, channelId: string, messageId: n
   } catch (e) {
     // 消息已不存在也算成功
     if (!(e instanceof Error) || !/message to delete not found|MESSAGE_ID_INVALID/i.test(e.message)) throw e;
+  }
+}
+
+/** deleteMessages 单次上限 */
+export const DELETE_BATCH = 100;
+
+/**
+ * 批量删除消息 (一次最多 100 条, 1 个子请求)。不存在的消息 TG 会跳过。
+ * 限流和 401 (令牌失效) 原样抛出; 其他失败 (超过 48 小时不能删, 无删除权限等) 返回 false, 由调用方当作已处理。
+ */
+export async function deleteMessages(bot: BotRow, channelId: string, ids: number[]): Promise<boolean> {
+  if (!ids.length) return true;
+  try {
+    await tgCall(bot.token, 'deleteMessages', { chat_id: channelId, message_ids: ids });
+    return true;
+  } catch (e) {
+    if (e instanceof TgRateLimit || (e instanceof TgFatal && e.message.startsWith('401'))) throw e;
+    return false;
   }
 }
 

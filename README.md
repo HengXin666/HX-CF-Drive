@@ -58,7 +58,7 @@ v0.2 的目标只有两个: Cloudflare 各项额度尽量少用, Worker CPU 尽�
 - 请求先匹配 Assets 静态文件 (`run_worker_first = false`), 只有 `/api` `/dav` `/f` `/s` 才进 Worker。
 - Worker 用 Hono 挂载 REST, WebDAV, 签名直链和分享四组路由, 元数据读写走 D1, 文件内容走 Telegram Bot API。
 - Bot 池 x 频道池: 写入按 blob id 哈希打散到所有可写频道; Bot 失效时用另一个 Bot 转发原消息拿新 file_id。
-- 每日维护 (Bot 探活, 回收站清理, 删除孤儿分片) 默认由 GitHub Actions 调接口触发, 不占 Free 账户的 Cron 名额; keepalive.yml 每周重新启用定时工作流, 防止 60 天无活动被 GitHub 自动停用。
+- 定时维护 (每 6 小时: Bot 探活, 回收站清理, 删除孤儿分片, 清扫放弃上传的消息) 默认由 GitHub Actions 调接口触发, 有积压时循环调用, 不占 Free 账户的 Cron 名额; keepalive.yml 每周重新启用定时工作流, 防止 60 天无活动被 GitHub 自动停用。
 
 <details>
 <summary><b>目录结构</b></summary>
@@ -97,11 +97,13 @@ docs/                        部署, 额度, 接入, Telegram 配置, 方案对�
 | --- | --- | --- | --- |
 | init | `POST /api/v1/uploads` | 只读查重与解析路径, 新目录才写 | 0 |
 | chunk | `PUT /api/v1/uploads/chunk` | **零读写** | 每片 1 次 `sendDocument` |
-| commit | `POST /api/v1/uploads/commit` | 一次批量写 (blob + node, 含索引约 6 行) | 0 |
+| fold (可选) | `POST /api/v1/uploads/fold` | **零读写**, 每 256 片验一次签名, 换一个聚合回执 | 0 |
+| commit | `POST /api/v1/uploads/commit` | 一次批量写 (blob + node, 含索引约 6 行); 超过 256 片时每 256 片多 1 行 | 0 |
 | 秒传 | `POST /api/v1/uploads` 命中 sha256 | 一次请求完成, 写约 4 行 (含索引) | 0 |
 
-- 浏览器端先算 sha256, 命中已有 blob 时 1 次请求完成上传。
-- 每个分片返回一张签名回执, 客户端保存回执即可断点续传, 服务端不保存任何上传中的状态。
+- 浏览器端先算 sha256, 命中已有 blob 时 1 次请求完成上传。受限令牌只能秒传自己根目录里已有的文件。
+- 每个分片返回一张签名回执, 客户端保存回执即可断点续传, 服务端不保存任何上传中的状态。网页端: 同一浏览器 24 小时内重新选择同一个文件 (同目录, 同名, 同大小, 同修改时间), 只补传缺的分片。
+- 大文件 (多于 256 片, 约 4.75 GiB) 每凑满一组 256 片就 fold 成一个聚合回执, commit 时验签很快; 清单按 256 片一段存进 `blob_parts`, 读取时按 Range 只加载用到的段。单文件不再受 D1 单行 2 MB 的限制。
 - 小文件也可以用 `POST /api/v1/upload` 一次性上传 (multipart 或 raw), 适合 PicGo 和 ShareX。
 
 ## 📥 下载流程
@@ -112,6 +114,7 @@ docs/                        部署, 额度, 接入, Telegram 配置, 方案对�
 - 单次响应冷拼最多 24 片 (约 456 MiB), 热拼最多 48 片, 超出部分返回 206, 网页端, 播放器, 下载器按 Range 续拉。
 - file_path 在 isolate 内存里缓存 50 分钟 (Telegram 保证至少有效 1 小时), 热文件不再调用 getFile。
 - Workers Paid 计划子请求上限 10,000, 调大 `SUBREQ_BUDGET` 即可一次拼更多片。
+- 断点续传: 服务端支持 Range 和 If-Range, aria2, IDM, `curl -C -` 都能续。网页端 (Chrome / Edge, 大于 400 MB 时用 File System Access 写本地文件) 每段失败自动重试 (指数退避, 最多 8 次); 最终失败或关掉页面后, 再点同一个文件的下载会接着写, 文件内容变了就从头开始。其他浏览器交给浏览器自带下载。
 
 ## ⚖️ 与同类项目
 
@@ -200,6 +203,38 @@ node scripts/e2e.mjs             # 端到端冒烟
 | [docs/QUOTA.md](docs/QUOTA.md) | 每个操作的请求量与 D1 行读写, 免费额度占用 |
 | [docs/COMPARISON.md](docs/COMPARISON.md) | 与 CloudFlare-ImgBed, Teldrive 等方案对比 |
 
+## 🛟 适用场景与风险
+
+文件内容存在 Telegram, 不在你的控制之内: 存储账号或 Bot 被封, 频道被删, 文件就没了。D1 里的目录树是唯一不可再生的数据。
+
+| 适合 | 不适合 |
+| --- | --- |
+| 图床, 公开分享的素材 | 唯一副本 |
+| 备份的第二份 / 第三份副本 | 业务关键数据, 例如用户头像, 邮件正文, 附件原件 |
+| 可以重新生成或重新下载的大文件 | 合规敏感数据 (个人信息, 医疗, 财务) |
+| Agent 的临时文件, 中间产物 | 需要 SLA 的生产数据 |
+
+如果要给别的服务当存储 (例如头像, 邮件正文), 主副本请放在 R2 / S3 / 数据库里, 这里只当缓存或备份。
+
+备份建议:
+
+- 定期导出目录树: `npx wrangler d1 export hx-cf-drive --remote --output=backup.sql`, 可以放进 GitHub Actions 定时跑。
+- 重要文件另存一份到别处 (rclone 经 WebDAV 同步即可)。
+- 多频道冗余写会让上传的 TG 调用和 manifest 翻倍, 目前不做。
+
+## 📝 更新记录
+
+**v0.3** (迁移 0002, 0003)
+
+- 回收站可以立即彻底删除和清空; TG 删除改用 `deleteMessages` 批量删; 维护返回剩余量, 有积压时循环调用 (#6)
+- 放弃的上传留下的消息按消息 id 水位清扫, 维护改为每 6 小时一次 (#7)
+- 受限令牌只能秒传自己根目录里的文件, 上传的文件不登记哈希 (#8)
+- 补充适用场景, 风险与备份建议 (#9)
+- `PUBLIC_URL` 与 Service Binding 接入说明 (#10)
+- 500 不再返回原始错误, 带 `X-Request-Id`; 不再接受 `?token=` (#11)
+- 大文件分批提交 (fold) 与分段清单 `blob_parts` (#12)
+- 网页大文件下载自动重试与断点续传 (#13)
+
 ## ⚠️ 已知限制
 
 <details>
@@ -211,7 +246,9 @@ node scripts/e2e.mjs             # 端到端冒烟
 - 搜索用 `LIKE '%q%'`, 未命中时扫全表, 是 D1 读行的主要来源, 已按令牌限频 (`SEARCH_PER_MIN`, 默认 6/分)。
 - WebDAV 的 LOCK 是假锁, 只为兼容 Windows 和 Finder。
 - 不支持空文件 (0 字节)。
-- 同一分片被并发重传时, 频道里可能多出一条无引用消息, 只占频道空间, 由每日维护清理。
+- 同一分片被并发重传, 或上传了分片但没有提交时, 频道里会留下无引用消息, 由定时维护按消息 id 水位清扫 (`ORPHAN_SWEEP`, 默认开)。TG 只允许 Bot 删除 48 小时内的消息, 维护停掉超过 48 小时就清不掉了; 多个部署共用一个频道时必须设 `ORPHAN_SWEEP=0`。
+- 回收站默认保留 `TRASH_DAYS` (7) 天, 也可以 `POST /api/v1/fs/purge` 立即彻底删除, 或 `POST /api/v1/fs/trash/empty` 清空。
+- 受限令牌只能秒传自己根目录里已有的文件, 上传的文件也不登记哈希, 防止凭哈希读别人的文件或投毒。
 - 上传路径的 CPU 时间尚未在线上实测, 部署后用 `wrangler tail` 看 `cpuTime`。
 
 </details>

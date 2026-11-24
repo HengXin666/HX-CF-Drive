@@ -261,7 +261,8 @@ export async function trashNode(env: Env, id: string): Promise<number> {
 /** 从回收站恢复: 子孙本来就没动, 只清顶层标记; 原位置重名则加后缀, 原父目录不在了就放回根 */
 export async function restoreNode(env: Env, id: string): Promise<void> {
   const node = await env.DB.prepare('SELECT * FROM nodes WHERE id = ?').bind(id).first<NodeRow>();
-  if (!node || !node.deleted_at) throw new HttpError(404, 'not in trash');
+  // deleted_at = 1 是已提交彻底删除, 不能再恢复
+  if (!node || !node.deleted_at || node.deleted_at <= 1) throw new HttpError(404, 'not in trash');
   const parent = node.parent_id ? await getNode(env, node.parent_id) : null;
   const parentId = parent ? parent.id : 'root';
   let name = node.name;

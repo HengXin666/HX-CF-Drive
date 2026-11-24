@@ -15,7 +15,7 @@ curl -X POST -H "Authorization: Bearer $ADMIN" -H "Content-Type: application/jso
 
 - `scopes`: `read`, `write`, `admin` 的组合。
 - `rootPath`: 令牌只能看到这个目录及其子目录, 路径都相对它。
-- 传递方式: `Authorization: Bearer <token>`, WebDAV 用 Basic (用户名随意, 密码填令牌), 也可以 `?token=`。
+- 传递方式: `Authorization: Bearer <token>`, WebDAV 用 Basic (用户名随意, 密码填令牌)。不支持 `?token=` (会进浏览器历史, 代理日志和 Referer); 需要免令牌访问时用签名直链 `/f/` 或分享链接 `/s/`。
 
 ## 2. REST API
 
@@ -29,19 +29,22 @@ curl -X POST -H "Authorization: Bearer $ADMIN" -H "Content-Type: application/jso
 | POST | `/api/v1/fs/delete` `{id或path}` | 移入回收站 |
 | GET | `/api/v1/fs/trash` | 回收站 |
 | POST | `/api/v1/fs/restore` `{id}` | 恢复 |
+| POST | `/api/v1/fs/purge` `{id}` | 彻底删除 (返回 `more=1` 表示有积压, 由维护接着清) |
+| POST | `/api/v1/fs/trash/empty` | 清空回收站 (受限令牌只清自己根下的) |
 | GET | `/api/v1/fs/search?q=&limit=` | 文件名搜索 |
 | POST | `/api/v1/fs/link` `{id, expiresIn}` | 签名直链, expiresIn 秒, 0 为永久 |
 | GET | `/api/v1/files/:id/content` | 读取内容, 支持 Range, `?download=1` |
 | POST | `/api/v1/upload?path=&rename=1` | 一次性上传 (multipart 字段 file, 或原始 body + `?name=`) |
 | POST | `/api/v1/uploads` | 分片上传: 初始化, 返回签名凭证 ticket |
 | PUT | `/api/v1/uploads/chunk?i=&ticket=` | 分片上传: 传第 i 片, 返回签名回执 receipt |
-| POST | `/api/v1/uploads/commit` `{ticket, receipts}` | 分片上传: 提交全部回执 |
+| POST | `/api/v1/uploads/fold` `{ticket, receipts}` | 分片上传 (可选): 一组 256 片的回执换一个聚合回执 fold |
+| POST | `/api/v1/uploads/commit` `{ticket, receipts, folds}` | 分片上传: 提交回执和聚合回执 |
 | POST/GET/DELETE | `/api/v1/shares` | 分享链接 |
 | GET | `/f/:id/:name?e=&s=` | 签名直链 (公开) |
 | GET | `/s/:id?p=密码&path=子路径` | 分享 (公开) |
 | * | `/api/v1/admin/*` | 管理: stats, bots, channels, tokens, maintenance |
 
-错误统一返回 `{"error": "..."}`。429 和 503 带 `Retry-After` 头, 客户端按它等待后重试。
+错误统一返回 `{"error": "..."}`; 服务端内部错误只返回 `{"error":"internal error","requestId":"..."}`。429 和 503 带 `Retry-After` 头, 客户端按它等待后重试。
 
 ### 分片上传流程
 
@@ -62,6 +65,29 @@ curl -X PUT -H "Authorization: Bearer $TOKEN" --data-binary @part0 "$BASE/api/v1
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d "{\"ticket\":\"$TICKET\",\"receipts\":[\"...\",\"...\",\"...\"]}" $BASE/api/v1/uploads/commit
 ```
+
+秒传规则: 管理员和根目录为 `/` 的令牌, 库里有同 sha256 同大小的文件就秒传; 受限令牌只有当这个文件已经在它自己的根目录里时才秒传, 否则照常上传 (它上传的文件也不登记哈希, 防止投毒)。
+
+#### 断点续传
+
+- 凭证 24 小时有效。中断后用同一个 ticket 补传缺的分片 (已有回执的不用重传), 再 commit。
+- 回执只是签名字符串, 可以存在任何地方 (文件, 数据库)。网页端存在 localStorage, 键是目录 + 文件名 + 大小 + 修改时间。
+
+#### 分批提交 (fold)
+
+分片很多时 (例如 100 GB 约 5390 片), 一次 commit 验几千个签名可能超出 Free 计划的 CPU 时间。多于 256 片时建议:
+
+1. 分片按 256 对齐分组: 第 g 组是第 `g*256` 到 `g*256+255` 片, 最后一组可以不足 256。
+2. 一组的回执凑齐后, `POST /api/v1/uploads/fold {ticket, receipts: [这一组的全部回执]}`, 返回 `{"fold":"..."}`, 之后这组的回执可以丢掉。
+3. commit 时 `{ticket, folds: [...], receipts: [没折叠的零散回执]}`。两者可以混用, 同一组给了聚合回执就忽略它的零散回执。
+
+限制: 一次 fold 只接受一个完整的组, 跨组或缺片返回 400; 聚合回执和凭证一样 24 小时内有效。256 片以内的文件不需要 fold。
+
+### 下载与续传
+
+- `GET /api/v1/files/:id/content` 和签名直链都支持 `Range`; 带 `If-Range: <ETag>` 时内容变了会返回 200 整个文件。
+- Free 计划单次响应最多拼约 456 MB, 超出返回 206。按 `Content-Range` 的结束位置继续发 `Range: bytes=<end+1>-` 直到拿满。
+- aria2, IDM, `curl -C - -o a.bin "<直链>"` 都能断点续传 (curl 每次只拿到一段, 需要循环到文件大小为止)。
 
 可选参数: `overwrite` 覆盖同名文件, `mkdirs: false` 禁止自动建目录。单个请求体不能超过 100 MB (CF 免费计划), 所以超过 19 MiB 的文件必须走分片接口。
 
@@ -151,3 +177,33 @@ async function upload(file, path = '/') {
 `/f/*` 已开启 CORS, 可以跨域加载。
 
 大文件 (冷读超过约 456 MB) 单次响应会被 206 截断, 浏览器直接点链接下载会只拿到第一段。网页端会自动按 Content-Range 续拉 (`web/src/lib/transfer.ts` 的 `download`), 或用支持断点续传的下载器 (aria2, IDM)。播放器本身就按 Range 请求, 不受影响。
+
+## 8. 从其他 Worker 或服务端调用
+
+### Service Binding (推荐)
+
+同一账户下的其他 Worker 不要走公网域名: 账户的 Bot 防护可能对非浏览器 UA 弹托管质询, 而且每次调用都算一次公网请求。用 Service Binding 直接调用, 不经过公网, 不过质询:
+
+```toml
+# 调用方的 wrangler.toml
+[[services]]
+binding = "DRIVE"
+service = "hx-cf-drive"
+```
+
+```ts
+// 主机名随便写, 路由只看路径
+const r = await env.DRIVE.fetch('https://drive/api/v1/fs/list?path=/', {
+  headers: { Authorization: `Bearer ${env.DRIVE_TOKEN}` },
+});
+```
+
+返回的直链和分享链接用 `PUBLIC_URL` (在 `wrangler.toml` 的 `[vars]` 或部署变量里设置) 拼出, 没设时用请求的 origin。经 Service Binding 调用时请务必设置 `PUBLIC_URL`, 否则链接会是 `https://drive/...` 这样的内部地址。
+
+### 外部 HTTP 调用
+
+从 VPS, CI 等外部服务器调用时, 请带一个自定义 User-Agent (例如 `curl -A hxd/1`, 或代码里设置 `User-Agent: my-service/1`)。curl, node 等默认 UA 可能被 Cloudflare 的托管质询拦下, 返回一个 HTML 页面而不是 JSON。不需要也不建议为此修改账户或区域的安全设置。
+
+### 错误响应
+
+服务端内部错误只返回 `{"error":"internal error","requestId":"..."}`, 响应头带 `X-Request-Id`; 详细原因在 `wrangler tail` 的日志里按这个 id 查。请求体不是合法 JSON 时返回 400。

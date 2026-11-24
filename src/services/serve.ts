@@ -1,6 +1,6 @@
 /**
  * 读取文件: HEAD, Range, TG 分片流式拼接
- * - 分片清单一行 JSON, 并缓存在 isolate 内存里: 热文件 D1 零读
+ * - 分片清单一行 JSON (大文件按 256 片分段存 blob_parts, 按 Range 只读用到的段), 缓存在 isolate 内存里: 热文件 D1 零读
  * - 单次响应能拼多少片由子请求预算动态决定 (冷分片 2 次: getFile + 下载; 热分片 1 次)
  * - 字节由 FixedLengthStream 原生搬运, JS 不碰数据
  */
@@ -10,7 +10,7 @@ import { allBots, type BotRow, cachedPath, fetchChunkRange, markDead, rebindFile
 import { mapToChunks, parseRange, type ByteRange } from '../lib/range';
 import type { NodeRow } from '../lib/tree';
 import { HttpError, now } from '../lib/util';
-import type { ChunkRef } from './upload';
+import { type ChunkRef, PART_SIZE } from './upload';
 
 export interface ServeOptions {
   /** 是否允许边缘缓存 (永久签名直链的小文件, 需绑定自定义域名才生效)  */
@@ -20,7 +20,17 @@ export interface ServeOptions {
   waitUntil?: (p: Promise<unknown>) => void;
 }
 
-interface BlobInfo { id: string; size: number; chunkSize: number; refs: ChunkRef[] }
+/**
+ * parts = 0: 清单整行在 blobs.manifest, refs 一次读全。
+ * parts > 0: 清单分段在 blob_parts, refs 是稀疏数组, loaded 记录已读入的段, 用 ensureParts 按需补读。
+ */
+export interface BlobInfo { id: string; size: number; chunkSize: number; parts: number; refs: ChunkRef[]; loaded: Set<number> }
+
+/** 解析 blobs.manifest: 数组是整份清单, {"parts":N} 是分段清单 */
+export function parseManifest(raw: string): { parts: number; refs: ChunkRef[] } {
+  const v = JSON.parse(raw) as ChunkRef[] | { parts: number };
+  return Array.isArray(v) ? { parts: 0, refs: v } : { parts: v.parts, refs: [] };
+}
 
 const blobCache = new Map<string, { at: number; b: BlobInfo }>();
 const BLOB_TTL = 30 * 60_000;
@@ -33,13 +43,31 @@ export async function loadBlob(env: Env, id: string): Promise<BlobInfo> {
     .bind(id)
     .first<{ size: number; chunk_size: number; manifest: string }>();
   if (!row) throw new HttpError(404, 'content missing');
-  const b: BlobInfo = { id, size: row.size, chunkSize: row.chunk_size, refs: JSON.parse(row.manifest) };
+  const m = parseManifest(row.manifest);
+  const b: BlobInfo = { id, size: row.size, chunkSize: row.chunk_size, parts: m.parts, refs: m.refs, loaded: new Set() };
   if (blobCache.size > 5000) blobCache.clear();
   blobCache.set(id, { at: now(), b });
   return b;
 }
 
 export function forgetBlob(id: string) { blobCache.delete(id); }
+
+/** 分段清单: 读入覆盖分片 [fromIdx, toIdx] 的段 (已读过的跳过), 一次查询 */
+export async function ensureParts(env: Env, b: BlobInfo, fromIdx: number, toIdx: number): Promise<void> {
+  if (!b.parts) return;
+  const lo = Math.max(0, Math.floor(fromIdx / PART_SIZE));
+  const hi = Math.min(b.parts - 1, Math.floor(toIdx / PART_SIZE));
+  let need = false;
+  for (let g = lo; g <= hi; g++) if (!b.loaded.has(g)) need = true;
+  if (!need) return;
+  const rows = (await env.DB.prepare('SELECT idx, refs FROM blob_parts WHERE blob_id = ? AND idx BETWEEN ? AND ?')
+    .bind(b.id, lo, hi).all<{ idx: number; refs: string }>()).results;
+  for (const r of rows) {
+    const refs = JSON.parse(r.refs) as ChunkRef[];
+    for (let i = 0; i < refs.length; i++) b.refs[r.idx * PART_SIZE + i] = refs[i];
+    b.loaded.add(r.idx);
+  }
+}
 
 /**
  * 在子请求预算内, 从 r.start 起最多能拼到哪个字节。
@@ -75,8 +103,11 @@ export async function serveNode(env: Env, node: NodeRow, req: Request, opt: Serv
   if (node.size === 0) return new Response(req.method === 'HEAD' ? null : '', { status: 200, headers: { ...base, 'Content-Length': '0' } });
 
   let range: ByteRange | null;
+  // If-Range 和当前 ETag 不一致: 内容变了, 忽略 Range 返回整个文件 (断点续传的客户端据此从头开始)
+  const ifRange = req.headers.get('If-Range');
+  const rangeHeader = ifRange && ifRange !== etag ? null : req.headers.get('Range');
   try {
-    range = parseRange(req.headers.get('Range'), node.size);
+    range = parseRange(rangeHeader, node.size);
   } catch {
     return new Response(null, { status: 416, headers: { ...base, 'Content-Range': `bytes */${node.size}` } });
   }
@@ -96,6 +127,9 @@ export async function serveNode(env: Env, node: NodeRow, req: Request, opt: Serv
 
   const blob = await loadBlob(env, node.blob_id);
   const want = range ?? { start: 0, end: blob.size - 1 };
+  // 分段清单: 一次响应最多拼 budget 片, 只读这些片所在的段
+  const firstIdx = Math.floor(want.start / blob.chunkSize);
+  await ensureParts(env, blob, firstIdx, Math.min(firstIdx + budget, Math.floor(want.end / blob.chunkSize)));
   const r = fitBudget(want, blob.chunkSize, budget, (i) => !!cachedPath(blob.refs[i].b, blob.refs[i].f));
   // 没带 Range 但一次拼不完: 按 206 返回前面一段, 播放器和下载器会接着用 Range 拉
   const status = range || r.end !== want.end ? 206 : 200;
@@ -136,7 +170,7 @@ async function tgStream(env: Env, blob: BlobInfo, r: ByteRange, waitUntil?: (p: 
 /** 打开一个分片; 上传它的 Bot 失效时换 Bot 重新绑定 file_id 并更新清单 */
 async function openChunk(env: Env, bots: BotRow[], blob: BlobInfo, idx: number, from: number, to: number) {
   const ch = blob.refs[idx];
-  if (!ch) throw new HttpError(500, `chunk ${idx} missing in manifest`);
+  if (!ch) { console.error('chunk missing in manifest', idx); throw new HttpError(500, 'internal error'); }
   const owner = bots.find((b) => b.id === ch.b);
   if (owner && owner.status !== 'dead') {
     try {
@@ -151,8 +185,14 @@ async function openChunk(env: Env, bots: BotRow[], blob: BlobInfo, idx: number, 
     try {
       const fid = await rebindFileId(alt, ch.c, ch.m);
       blob.refs[idx] = { ...ch, b: alt.id, f: fid };
-      // 整个清单是一行, 换绑只写 1 行
-      await env.DB.prepare('UPDATE blobs SET manifest = ? WHERE id = ?').bind(JSON.stringify(blob.refs), blob.id).run();
+      // 整个清单是一行 (或分段时只写所在的那一段), 换绑只写 1 行
+      if (blob.parts) {
+        const g = Math.floor(idx / PART_SIZE);
+        const seg = blob.refs.slice(g * PART_SIZE, Math.min((g + 1) * PART_SIZE, blob.refs.length));
+        await env.DB.prepare('UPDATE blob_parts SET refs = ? WHERE blob_id = ? AND idx = ?').bind(JSON.stringify(seg), blob.id, g).run();
+      } else {
+        await env.DB.prepare('UPDATE blobs SET manifest = ? WHERE id = ?').bind(JSON.stringify(blob.refs), blob.id).run();
+      }
       return await fetchChunkRange(alt, fid, from, to, ch.s);
     } catch {
       /* 试下一个 */

@@ -1,5 +1,6 @@
 // 本地测试用的 Telegram Bot API 模拟服务器: node scripts/mock-tg.mjs [port]
-// 支持 getMe sendDocument getFile getChat getChatMember deleteMessage forwardMessage 和 /file 下载 (含 Range)
+// 支持 getMe sendDocument sendMessage getFile getChat getChatMember deleteMessage deleteMessages forwardMessage 和 /file 下载 (含 Range)
+// 测试辅助: GET /__mock/messages?chat=ID 返回该频道现存消息 id; GET /__mock/calls 返回各方法调用次数
 // 环境变量 MOCK_429_EVERY=N: 每 N 次 sendDocument 返回一次 429
 import http from 'node:http';
 
@@ -7,6 +8,7 @@ const port = Number(process.argv[2] ?? 8787 + 100);
 const files = new Map(); // fileKey -> Buffer
 const messages = new Map(); // `${chat}:${id}` -> fileKey
 let msgSeq = 1, sendCount = 0;
+const calls = {};
 const every429 = Number(process.env.MOCK_429_EVERY ?? 0);
 
 const json = (res, code, body) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body)); };
@@ -16,6 +18,12 @@ async function readBody(req) { const parts = []; for await (const p of req) part
 
 http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
+  if (url.pathname === '/__mock/messages') {
+    const chat = url.searchParams.get('chat');
+    const ids = [...messages.keys()].filter((k) => k.startsWith(chat + ':')).map((k) => Number(k.split(':')[1]));
+    return ok(res, ids.sort((a, b) => a - b));
+  }
+  if (url.pathname === '/__mock/calls') return ok(res, calls);
   const m = /^\/bot(\d+):[^/]+\/(\w+)$/.exec(url.pathname);
   const f = /^\/file\/bot(\d+):[^/]+\/(.+)$/.exec(url.pathname);
   if (f) {
@@ -45,6 +53,7 @@ http.createServer(async (req, res) => {
     }
   } else if (raw.length) params = JSON.parse(raw.toString());
 
+  calls[method] = (calls[method] ?? 0) + 1;
   switch (method) {
     case 'getMe': return ok(res, { id: Number(botId), is_bot: true, username: `mock${botId}_bot` });
     case 'getChat': return ok(res, { id: Number(params.chat_id), type: 'channel', title: 'mock channel' });
@@ -76,6 +85,17 @@ http.createServer(async (req, res) => {
     case 'deleteMessage': {
       messages.delete(`${params.chat_id}:${params.message_id}`);
       return ok(res, true);
+    }
+    case 'deleteMessages': {
+      const ids = params.message_ids ?? [];
+      if (!Array.isArray(ids) || ids.length < 1 || ids.length > 100) return json(res, 400, { ok: false, error_code: 400, description: 'Bad Request: message_ids must be 1-100' });
+      for (const id of ids) messages.delete(`${params.chat_id}:${id}`);
+      return ok(res, true);
+    }
+    case 'sendMessage': {
+      const id = msgSeq++;
+      messages.set(`${params.chat_id}:${id}`, null);
+      return ok(res, { message_id: id, chat: { id: Number(params.chat_id) }, text: params.text });
     }
     default: return json(res, 400, { ok: false, error_code: 400, description: `mock: ${method} not implemented` });
   }

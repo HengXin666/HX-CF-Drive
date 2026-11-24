@@ -15,23 +15,27 @@ app.onError((err, c) => {
   if (err instanceof HttpError) {
     return c.json({ error: err.message }, err.status as 400, err.headers);
   }
-  console.error(err);
-  return c.json({ error: 'internal error', detail: String(err) }, 500);
+  // 请求体不是合法 JSON (c.req.json 抛 SyntaxError)
+  if (err instanceof SyntaxError) return c.json({ error: 'invalid json body' }, 400);
+  // 详细错误只进日志, 客户端只拿到请求 ID, 不暴露 SQL, 上游返回等内部信息
+  const requestId = c.req.header('cf-ray') ?? crypto.randomUUID();
+  console.error(`[${requestId}] ${c.req.method} ${new URL(c.req.url).pathname}`, err);
+  return c.json({ error: 'internal error', requestId }, 500, { 'X-Request-Id': requestId });
 });
 
 app.use(
   '/api/*',
   cors({
     origin: '*',
-    allowHeaders: ['Authorization', 'Content-Type', 'Range', 'X-Share-Password'],
+    allowHeaders: ['Authorization', 'Content-Type', 'Range', 'If-Range', 'X-Share-Password'],
     allowMethods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    exposeHeaders: ['Content-Range', 'Content-Length', 'ETag', 'Retry-After'],
+    exposeHeaders: ['Content-Range', 'Content-Length', 'ETag', 'Retry-After', 'X-Request-Id'],
     maxAge: 86400,
   }),
 );
 app.use('/f/*', cors({ origin: '*', exposeHeaders: ['Content-Range', 'Content-Length', 'ETag'] }));
 
-app.get('/api/health', (c) => c.json({ ok: true, name: 'HX-CF-Drive', version: '0.2.0' }));
+app.get('/api/health', (c) => c.json({ ok: true, name: 'HX-CF-Drive', version: '0.3.0' }));
 app.route('/api/v1', api);
 app.route('/dav', dav);
 app.route('/', pub);

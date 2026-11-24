@@ -61,14 +61,19 @@ node scripts/hxd.mjs share /a.zip [密码] [天数]
 2. 对 i in 0..chunkCount-1:
    PUT /api/v1/uploads/chunk?i=<i>&ticket=<ticket>   body = 文件第 i 段 (每段恰好 chunkSize, 最后一段除外)
    → {"receipt"}                     保存回执; 并发不超过 2
-3. POST /api/v1/uploads/commit {"ticket","receipts":[按任意顺序]}  → {"node","url"}
+   (可选, 多于 256 片时建议) 每凑满一组 256 片 (第 g 组 = 片 g*256 .. g*256+255, 最后一组可以不足):
+   POST /api/v1/uploads/fold {"ticket","receipts":[这一组的全部回执]}  → {"fold"}   之后丢掉这组回执
+3. POST /api/v1/uploads/commit {"ticket","receipts":[剩余的零散回执],"folds":[聚合回执]}  → {"node","url"}
 ```
 
 ticket 24 小时有效, 服务端不存中间状态, 中断后用同一 ticket 补传缺的片再 commit 即可。
+受限令牌 (根目录不是 /) 只能秒传自己根目录里已有的文件。
 
 ### 大文件下载
 
-单次响应最多拼约 456 MB, 超出会返回 206 截断。按 `Content-Range` 的结束位置继续发 `Range: bytes=<end+1>-`, 直到拿满 `size`。
+单次响应最多拼约 456 MB, 超出会返回 206 截断。按 `Content-Range` 的结束位置继续发 `Range: bytes=<end+1>-`, 直到拿满 `size`。中断后从已写入的字节数接着发 Range 即可续传 (可带 `If-Range: <ETag>`, 内容变了会返回 200 整个文件)。
+
+令牌只能放在 `Authorization: Bearer` 头里, 不支持 `?token=`。服务端内部错误只返回 `{"error":"internal error","requestId"}`。
 
 ## 注意
 

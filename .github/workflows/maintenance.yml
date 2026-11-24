@@ -1,21 +1,31 @@
-# 每日维护: Bot 探活, 回收站清理, 删除孤儿分片 (代替 CF Cron, 不占账户 Cron 名额)
+# 定时维护 (每 6 小时): Bot 探活, 回收站清理, 删除孤儿分片, 清扫放弃上传的消息 (代替 CF Cron, 不占账户 Cron 名额)
+# TG 只允许 Bot 删除 48 小时内的消息, 间隔不能再拉长
 name: Maintenance
 
 on:
   schedule:
-    - cron: '0 19 * * *' # UTC 19:00 = 北京时间 03:00
+    - cron: '0 */6 * * *'
   workflow_dispatch:
 
 jobs:
   run:
     if: vars.DEPLOY_ENABLED == 'true' && vars.CF_CRON != 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
-      - name: 调用维护接口
+      - name: 调用维护接口 (有积压时循环, 最多 20 次)
         env:
           BASE: ${{ vars.PUBLIC_URL }}
           ADMIN: ${{ secrets.ADMIN_TOKEN }}
         run: |
+          set -euo pipefail
           [ -n "$BASE" ] || { echo "::error::缺少变量 PUBLIC_URL"; exit 1; }
-          curl -fsS -A "hx-cf-drive-ci/1" --retry 3 -X POST -H "Authorization: Bearer $ADMIN" "$BASE/api/v1/admin/maintenance"
+          q=""
+          for i in $(seq 1 20); do
+            r=$(curl -fsS -A "hx-cf-drive-ci/1" --retry 3 -X POST -H "Authorization: Bearer $ADMIN" "$BASE/api/v1/admin/maintenance$q")
+            echo "$i: $r"
+            # 只有第一次清扫孤儿消息, 后面只清积压
+            q="?sweep=0"
+            echo "$r" | grep -q '"more":1' || break
+            sleep 2
+          done

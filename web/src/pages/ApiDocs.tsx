@@ -69,7 +69,7 @@ export function ApiDocs() {
       <div className="mx-auto flex max-w-[960px] flex-col gap-5">
         <section className="grid gap-3 md:grid-cols-3">
           {[
-            { icon: 'key' as const, t: '认证', d: 'Authorization: Bearer <token>。WebDAV 用 Basic, 密码填令牌。也可用 ?token=。' },
+            { icon: 'key' as const, t: '认证', d: 'Authorization: Bearer <token>。WebDAV 用 Basic, 密码填令牌。不支持 ?token=, 免令牌访问请用签名直链或分享链接。' },
             { icon: 'warn' as const, t: '错误', d: '统一返回 {"error":"..."}。429 和 503 带 Retry-After, 按它等待后重试。' },
             { icon: 'server' as const, t: 'WebDAV', d: `${base}/dav/ , rclone, RaiDrive, Infuse, OpenList 都能挂载。单文件 ≤ 100 MB。` },
           ].map((c) => (

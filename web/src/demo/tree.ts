@@ -129,7 +129,7 @@ export function trash(id: string): number {
 export function trashList(): (ReturnType<typeof publicNode> & { deletedAt: number })[] {
   const nodes = state().nodes;
   return Object.values(nodes)
-    .filter((n) => n.deletedAt !== null && nodes[n.parentId ?? '']?.deletedAt !== n.deletedAt)
+    .filter((n) => n.deletedAt !== null && n.deletedAt > 1 && nodes[n.parentId ?? '']?.deletedAt !== n.deletedAt)
     .sort((a, b) => b.deletedAt! - a.deletedAt!)
     .map((n) => ({ ...publicNode(n), deletedAt: n.deletedAt! }));
 }
@@ -145,6 +145,19 @@ export function restore(id: string) {
   for (let i = 1; children(n.parentId!).some((c) => c.id !== n.id && c.name === n.name); i++) {
     n.name = base.replace(/(\.[^.]*)?$/, (ext) => ` (${i})${ext}`);
   }
+}
+
+/** 彻底删除: 把回收站项目 (整棵子树) 的删除时间改成 1, 视为早已过期, 再跑一轮维护 */
+export async function purge(ids: string[] | null): Promise<Record<string, number>> {
+  const nodes = state().nodes;
+  const tops = ids ?? trashList().map((n) => n.id);
+  for (const id of tops) {
+    const n = nodes[id];
+    if (!n || n.deletedAt === null) continue;
+    const t = n.deletedAt;
+    for (const x of subtree(id)) if (x.deletedAt === t) x.deletedAt = 1;
+  }
+  return { ...(await maintenance()), more: 0, leftNodes: 0, leftBlobs: 0 };
 }
 
 /** 维护: 清理超过保留期的回收站条目, 以及引用为 0 的数据块 */

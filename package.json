@@ -1,6 +1,6 @@
 {
   "name": "hx-cf-drive",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "全部运行在 Cloudflare 上的 Telegram 网盘网关 (Workers + D1, 不用 R2)",
   "type": "module",

@@ -2,7 +2,11 @@ import type { Context, Next } from 'hono';
 import type { AppEnv, Env, Principal } from '../env';
 import { HttpError, now, safeEqual, sha256Hex } from './util';
 
-/** 从 Authorization: Bearer / Basic (WebDAV, 密码即令牌) / ?token= 中取令牌 */
+/**
+ * 从 Authorization: Bearer 或 Basic (WebDAV, 密码即令牌) 中取令牌。
+ * 不接受 ?token=: URL 会进浏览器历史, 代理日志和 Referer。
+ * 不需要令牌的访问用签名直链 /f/ 或分享链接 /s/。
+ */
 export function extractToken(req: Request): string | null {
   const h = req.headers.get('Authorization');
   if (h?.startsWith('Bearer ')) return h.slice(7).trim();
@@ -15,8 +19,7 @@ export function extractToken(req: Request): string | null {
       return null;
     }
   }
-  const q = new URL(req.url).searchParams.get('token');
-  return q || null;
+  return null;
 }
 
 export async function resolvePrincipal(env: Env, token: string | null): Promise<Principal | null> {
