@@ -34,9 +34,7 @@ export function Shell(props: {
       <div className="relative z-10 flex min-h-0 w-full min-w-0 flex-1 gap-2">
         <aside className="hidden w-56 shrink-0 flex-col overflow-hidden rounded-xl border border-border/40 bg-card/25 md:flex">
           <div className="flex h-12 items-center gap-2 px-4">
-            <span className="grid size-7 place-items-center rounded-lg bg-primary/15 text-link">
-              <Icon name="logo" className="size-[18px]" />
-            </span>
+            <img src="/icon-192.png" alt="" className="size-7 rounded-lg" />
             <span className="text-[13px] font-semibold tracking-tight">HX-CF-Drive</span>
           </div>
           <nav className="flex flex-col gap-0.5 px-2 py-1">

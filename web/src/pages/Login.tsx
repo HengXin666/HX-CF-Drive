@@ -29,9 +29,7 @@ export function Login({ onLogin }: { onLogin: () => void }) {
       <Backdrop variant="aurora" fade className="absolute inset-0 -z-10" />
       <div className="w-full max-w-sm rounded-2xl border border-border/50 bg-card/70 p-7 shadow-xl backdrop-blur">
         <div className="mb-6 flex items-center gap-3">
-          <span className="grid size-10 place-items-center rounded-xl bg-primary/15 text-link">
-            <Icon name="logo" className="size-6" />
-          </span>
+          <img src="/icon-192.png" alt="" className="size-12 rounded-xl" />
           <div>
             <div className="text-[17px] font-semibold tracking-tight">HX-CF-Drive</div>
             <div className="text-[12.5px] text-muted-foreground">Cloudflare + Telegram 网盘</div>
