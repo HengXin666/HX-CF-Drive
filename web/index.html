@@ -1,18 +1,21 @@
 <!doctype html>
-<html lang="zh-CN" data-mode="dark">
+<html lang="zh-CN" class="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>HX-CF-Drive</title>
     <link rel="icon" href="/favicon.png" type="image/png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <meta name="theme-color" content="#22272e" />
+    <meta name="theme-color" content="#09090b" />
     <script>
-      // 只用暗色; 皮肤在首帧前写好, 避免闪一下默认色
+      // 首帧前定好亮暗与强调色, 避免闪烁; 键与 HX-UI 的 ThemeProvider 一致 (hx-theme), 没选过时用暗色
       (function () {
         try {
-          var s = localStorage.getItem('hxd_skin');
-          if (s && s !== 'default') document.documentElement.setAttribute('data-skin', s);
+          var s = JSON.parse(localStorage.getItem('hx-theme') || '{}');
+          var m = s.mode || 'dark';
+          var d = m === 'dark' || (m === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+          document.documentElement.classList.toggle('dark', d);
+          document.documentElement.dataset.theme = s.accent || 'indigo';
         } catch (e) {}
       })();
     </script>

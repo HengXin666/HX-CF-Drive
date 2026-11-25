@@ -1,8 +1,8 @@
-// 通用输入框弹窗: 新建目录, 重命名, 移动, 分享密码等
-import { Button, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, Input } from '../ui';
+// 通用输入框弹窗: 新建目录, 重命名, 分享密码, 新建令牌等
 import { useEffect, useState } from 'react';
+import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Field, Input } from '../ui';
 
-export interface PromptField { key: string; label: string; value?: string; placeholder?: string; type?: string }
+export interface PromptField { key: string; label: string; value?: string; placeholder?: string; type?: string; description?: string }
 
 export interface PromptRequest {
   title: string;
@@ -10,8 +10,6 @@ export interface PromptRequest {
   okText?: string;
   /** 输入框上方的说明 */
   note?: string;
-  /** 确定按钮用危险色 */
-  danger?: boolean;
   onOk: (values: Record<string, string>) => Promise<void> | void;
 }
 
@@ -41,21 +39,20 @@ export function PromptDialog({ req, onClose }: { req: PromptRequest | null; onCl
 
   return (
     <Dialog open={!!req} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent>
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{req?.title}</DialogTitle>
+          {req?.note && <DialogDescription className="whitespace-pre-line">{req.note}</DialogDescription>}
         </DialogHeader>
-        {req?.note && <p className="text-sm whitespace-pre-line text-muted-foreground">{req.note}</p>}
         <form
-          className="flex flex-col gap-3"
+          className="flex flex-col gap-4"
           onSubmit={(e) => {
             e.preventDefault();
             void submit();
           }}
         >
           {req?.fields.map((f, i) => (
-            <label key={f.key} className="flex flex-col gap-1 text-sm">
-              <span className="text-muted-foreground">{f.label}</span>
+            <Field key={f.key} label={f.label} description={f.description} error={i === req.fields.length - 1 ? err || undefined : undefined}>
               <Input
                 autoFocus={i === 0}
                 type={f.type ?? 'text'}
@@ -63,12 +60,11 @@ export function PromptDialog({ req, onClose }: { req: PromptRequest | null; onCl
                 value={values[f.key] ?? ''}
                 onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
               />
-            </label>
+            </Field>
           ))}
-          {err && <p className="text-sm text-danger-fg">{err}</p>}
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={onClose}>取消</Button>
-            <Button type="submit" variant={req?.danger ? 'destructive' : 'primary'} loading={busy}>{req?.okText ?? '确定'}</Button>
+            <Button type="submit" loading={busy}>{req?.okText ?? '确定'}</Button>
           </DialogFooter>
         </form>
       </DialogContent>

@@ -1,5 +1,4 @@
 import { copyFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
@@ -29,7 +28,6 @@ export default defineConfig({
       },
     },
   ],
-  resolve: { alias: { '@hx/ui-dist': fileURLToPath(new URL('./node_modules/@hx/ui/dist', import.meta.url)) } },
   build: { outDir: OUT, emptyOutDir: true, chunkSizeWarningLimit: 1500 },
   server: {
     proxy: Object.fromEntries(['/api', '/f', '/s', '/dav'].map((p) => [p, { target: API, changeOrigin: true }])),

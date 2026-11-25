@@ -1,9 +1,10 @@
 // 登录: 输入管理员令牌或 API 令牌, 存在本地
 import { useState } from 'react';
 import { Icon } from '../components/Icon';
-import { api, auth } from '../lib/api';
-import { Backdrop, Button, Input } from '../ui';
+import { ThemeToggle } from '../components/Shell';
 import { DEMO_TOKEN, DemoLoginNote } from '../demo/LoginNote';
+import { api, auth } from '../lib/api';
+import { Backdrop, Button, Card, Field, Input, TooltipProvider } from '../ui';
 
 export function Login({ onLogin }: { onLogin: () => void }) {
   const [token, setToken] = useState(__DEMO__ ? DEMO_TOKEN : '');
@@ -26,26 +27,30 @@ export function Login({ onLogin }: { onLogin: () => void }) {
   };
 
   return (
-    <div className="relative isolate flex h-full items-center justify-center overflow-hidden bg-background p-6">
-      <Backdrop variant="aurora" fade className="absolute inset-0 -z-10" />
-      <div className="w-full max-w-sm rounded-2xl border border-border/50 bg-card/70 p-7 shadow-xl backdrop-blur">
-        <div className="mb-6 flex items-center gap-3">
-          <img src={`${import.meta.env.BASE_URL}icon-192.png`} alt="" className="size-12 rounded-xl" />
-          <div>
-            <div className="text-[17px] font-semibold tracking-tight">HX-CF-Drive</div>
-            <div className="text-[12.5px] text-muted-foreground">Cloudflare + Telegram 网盘</div>
+    <TooltipProvider>
+      <div className="relative isolate flex h-full flex-col overflow-hidden bg-background">
+        <Backdrop variant="grid" className="-z-10" />
+        <header className="flex h-14 items-center gap-2.5 border-b px-5">
+          <img src={`${import.meta.env.BASE_URL}icon-192.png`} alt="" className="size-7 rounded-md" />
+          <span className="text-sm font-semibold">HX-CF-Drive</span>
+          <span className="ml-auto"><ThemeToggle /></span>
+        </header>
+        <main className="flex flex-1 items-center justify-center p-6">
+          <div className="w-full max-w-sm">
+            <p className="mb-3 font-mono text-xs text-muted-foreground">Cloudflare · Telegram 网盘</p>
+            <h1 className="mb-6 text-4xl font-semibold tracking-tight">登录</h1>
+            <Card className="gap-4 p-6">
+              {__DEMO__ && <DemoLoginNote />}
+              <form className="flex flex-col gap-4" onSubmit={(e) => { e.preventDefault(); void submit(); }}>
+                <Field label="令牌" description="管理员令牌, 或后台签发的 API 令牌" error={err || undefined}>
+                  <Input type="password" autoFocus leading={<Icon name="key" />} placeholder="粘贴令牌" value={token} onChange={(e) => setToken(e.target.value)} />
+                </Field>
+                <Button type="submit" loading={busy} disabled={!token.trim()}>{__DEMO__ ? '进入演示' : '进入'}</Button>
+              </form>
+            </Card>
           </div>
-        </div>
-        {__DEMO__ && <DemoLoginNote />}
-        <form className="flex flex-col gap-3" onSubmit={(e) => { e.preventDefault(); void submit(); }}>
-          <div className="relative">
-            <Icon name="key" className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input type="password" autoFocus className="h-10 pl-9" placeholder="管理员令牌或 API 令牌" value={token} onChange={(e) => setToken(e.target.value)} />
-          </div>
-          {err && <p className="flex items-center gap-1.5 text-[13px] text-danger-fg"><Icon name="warn" /> {err}</p>}
-          <Button type="submit" variant="primary" className="h-10" loading={busy} disabled={!token.trim()}>{__DEMO__ ? '进入演示' : '进入'}</Button>
-        </form>
+        </main>
       </div>
-    </div>
+    </TooltipProvider>
   );
 }

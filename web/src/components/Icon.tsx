@@ -1,21 +1,29 @@
-// SVG 图标 (Iconify Solar 蒙版), 颜色跟随文字色
+// 图标与纯图标按钮。按钮带 aria-label 与悬停提示, 颜色跟随文字色
+import type { LucideIcon } from 'lucide-react';
 import { ICON, type IconName } from '../icons';
+import { Button, cn, Tooltip, TooltipContent, TooltipTrigger } from '../ui';
 
-export function Icon({ name, raw, className = 'size-4' }: { name?: IconName; raw?: string; className?: string }) {
-  return <span aria-hidden className={`inline-block shrink-0 bg-current align-[-0.2em] ${raw ?? (name ? ICON[name] : '')} ${className}`} />;
+export function Icon({ name, as, className }: { name?: IconName; as?: LucideIcon; className?: string }) {
+  const C = as ?? (name ? ICON[name] : null);
+  return C ? <C aria-hidden className={cn('size-4 shrink-0', className)} /> : null;
 }
 
-// 只有图标的按钮, 自带 aria-label 与悬停提示
 export function IconButton({ name, label, onClick, danger }: { name: IconName; label: string; onClick: () => void; danger?: boolean }) {
   return (
-    <button
-      type="button"
-      title={label}
-      aria-label={label}
-      onClick={(e) => { e.stopPropagation(); onClick(); }}
-      className={`grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground ${danger ? 'hover:text-danger-fg' : ''}`}
-    >
-      <Icon name={name} />
-    </button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          size="icon-sm"
+          variant="ghost"
+          aria-label={label}
+          onClick={(e) => { e.stopPropagation(); onClick(); }}
+          className={cn('text-muted-foreground hover:text-foreground', danger && 'hover:text-destructive')}
+        >
+          <Icon name={name} />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
   );
 }

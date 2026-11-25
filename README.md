@@ -159,7 +159,7 @@ node scripts/e2e.mjs             # 端到端冒烟
 - 重命名, 移动, 删除, 回收站, 搜索, 分享与永久直链。
 - 后台: 统计, 频道, Bot, 令牌, 手动维护, 以及内置接口文档页 (`/#/docs`)。
 
-`npm run build:web` 构建到 `dist/web`, 部署时作为静态资源上传。HX-UI 尚未发布到 npm, 暂以 `web/vendor/hx-ui-*.tgz` 引入。
+`npm run build:web` 构建到 `dist/web`, 部署时作为静态资源上传。HX-UI 2 只发 GitHub Release 的 tgz, 存一份在 `web/vendor/hx-ui-2.1.0.tgz` 引入 (离线也能装)。
 
 ## 🤖 接入与 Agent
 

@@ -1,20 +1,10 @@
-@import "@hx/ui/styles.css";
-/* 全局重置 (body, 滚动条, 焦点, 选区) */
-@import "@hx/ui/base.css";
-/* SVG 图标: icon-[solar--xxx] 类名 */
-@plugin "@iconify/tailwind4";
+@import "tailwindcss";
+/* HX-UI 2 的令牌 (亮暗两套, shadcn 格式), @theme 映射与组件用到的类 */
+@import "@hx/ui/tailwind.css";
+/* Geist / Geist Mono */
+@import "@hx/ui/fonts.css";
 
-/* 让 Tailwind 扫描 HX-UI 组件里用到的类名 */
-@source "../node_modules/@hx/ui/dist";
 /* 正常构建不扫描演示层; 演示构建时 vite.config.ts 会去掉这一行 */
 @source not "./demo";
 
 html, body, #root { height: 100%; }
-
-/* Iconify 蒙版默认按 24px 原尺寸平铺, 缩放到 size-4 时会被裁切, 这里统一拉伸到容器 */
-[class*="icon-[solar--"] {
-  -webkit-mask-size: 100% 100%;
-  mask-size: 100% 100%;
-  -webkit-mask-repeat: no-repeat;
-  mask-repeat: no-repeat;
-}

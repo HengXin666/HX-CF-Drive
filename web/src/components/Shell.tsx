@@ -1,23 +1,27 @@
-// 应用外壳: 左侧导航 (品牌, 页面, 用量, 皮肤, 退出) + 右侧主面板。版式沿用 HX-UI 文档站
+// 应用外壳: 左侧导航 (HX-UI Sidebar, 手机上收成抽屉) + 右侧主区。版式对齐 HX-UI 文档站:
+// 侧栏分组, 条目右侧小号等宽注释; 页头是等宽小字眉标 + 大标题 + 说明。
+import { useTheme } from '@hx/ui/theme';
+import {
+  Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader,
+  SidebarInset, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarTrigger,
+} from '@hx/ui/ui/sidebar';
+import { ConfirmDialogHost, Toaster, TooltipProvider } from '../ui';
 import type { ReactNode } from 'react';
 import { type IconName } from '../icons';
-import { AppFrame, ConfirmDialogHost, Toaster } from '../ui';
-import { Icon } from './Icon';
 
-export interface NavItem { id: string; label: string; icon: IconName }
+import { Icon, IconButton } from './Icon';
 
-const SKINS = [
-  { id: 'default', label: '石墨' },
-  { id: 'midnight', label: '午夜' },
-  { id: 'linear', label: '靛蓝' },
-  { id: 'fintech', label: '深海' },
-  { id: 'emerald', label: '翡翠' },
-] as const;
+export interface NavItem { id: string; label: string; hint: string; icon: IconName; group: string }
 
-export function setSkin(id: string) {
-  localStorage.setItem('hxd_skin', id);
-  if (id === 'default') document.documentElement.removeAttribute('data-skin');
-  else document.documentElement.setAttribute('data-skin', id);
+export function ThemeToggle() {
+  const { resolved, setMode } = useTheme();
+  return (
+    <IconButton
+      name={resolved === 'dark' ? 'sun' : 'moon'}
+      label={resolved === 'dark' ? '切换到亮色' : '切换到暗色'}
+      onClick={() => setMode(resolved === 'dark' ? 'light' : 'dark')}
+    />
+  );
 }
 
 export function Shell(props: {
@@ -28,83 +32,90 @@ export function Shell(props: {
   usage?: ReactNode;
   children: ReactNode;
 }) {
-  const skin = localStorage.getItem('hxd_skin') ?? 'default';
+  const groups = [...new Set(props.items.map((i) => i.group))];
   return (
-    <AppFrame className={__DEMO__ ? 'h-full w-full' : undefined}>
-      <div className="relative z-10 flex min-h-0 w-full min-w-0 flex-1 gap-2">
-        <aside className="hidden w-56 shrink-0 flex-col overflow-hidden rounded-xl border border-border/40 bg-card/25 md:flex">
-          <div className="flex h-12 items-center gap-2 px-4">
-            <img src={`${import.meta.env.BASE_URL}icon-192.png`} alt="" className="size-7 rounded-lg" />
-            <span className="text-[13px] font-semibold tracking-tight">HX-CF-Drive</span>
-          </div>
-          <nav className="flex flex-col gap-0.5 px-2 py-1">
-            {props.items.map((it) => {
-              const on = it.id === props.active;
-              return (
-                <button
-                  key={it.id}
-                  type="button"
-                  onClick={() => props.onNav(it.id)}
-                  className={`flex h-8 items-center gap-2.5 rounded-lg px-2.5 text-[13px] transition-colors ${
-                    on ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
-                  }`}
-                >
-                  <Icon name={it.icon} className={`size-4 ${on ? 'text-link' : ''}`} />
-                  {it.label}
-                </button>
-              );
-            })}
-          </nav>
-          <div className="flex-1" />
-          {props.usage && <div className="mx-2 mb-2 rounded-lg border border-border/40 bg-background/40 p-3">{props.usage}</div>}
-          <div className="flex items-center gap-1 border-t border-border/40 px-2 py-2">
-            <Icon name="palette" className="ml-1.5 size-4 text-muted-foreground" />
-            <select
-              aria-label="皮肤"
-              defaultValue={skin}
-              onChange={(e) => setSkin(e.target.value)}
-              className="h-7 min-w-0 flex-1 rounded-md bg-transparent px-1 text-[12px] text-muted-foreground outline-none hover:text-foreground"
-            >
-              {SKINS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
-            </select>
-            <button
-              type="button"
-              title="退出"
-              aria-label="退出"
-              onClick={props.onLogout}
-              className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-            >
-              <Icon name="logout" />
-            </button>
-          </div>
-        </aside>
-        <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-border/40">
-          <div className="flex h-11 items-center gap-1 border-b border-border/40 px-2 md:hidden">
-            {props.items.map((it) => (
-              <button key={it.id} type="button" title={it.label} aria-label={it.label} onClick={() => props.onNav(it.id)}
-                className={`grid size-8 place-items-center rounded-md ${it.id === props.active ? 'bg-accent text-link' : 'text-muted-foreground'}`}>
-                <Icon name={it.icon} />
-              </button>
+    <TooltipProvider delayDuration={300}>
+            {/* 侧栏默认 fixed 贴着视口; 演示站顶上有横幅, 改成相对外层定位 */}
+      <SidebarProvider className={__DEMO__ ? 'relative h-full min-h-0' : 'h-svh min-h-0'}>
+        <Sidebar collapsible="offcanvas" className={__DEMO__ ? 'md:absolute md:h-full' : undefined}>
+          <SidebarHeader className="h-14 flex-row items-center gap-2.5 border-b px-4">
+            <img src={`${import.meta.env.BASE_URL}icon-192.png`} alt="" className="size-7 rounded-md" />
+            <div className="grid leading-tight">
+              <span className="text-sm font-semibold tracking-tight">HX-CF-Drive</span>
+              <span className="font-mono text-[10.5px] text-muted-foreground">Cloudflare · Telegram</span>
+            </div>
+          </SidebarHeader>
+          <SidebarContent>
+            {groups.map((g) => (
+              <SidebarGroup key={g}>
+                <SidebarGroupLabel>{g}</SidebarGroupLabel>
+                <SidebarGroupContent>
+                  <SidebarMenu>
+                    {props.items.filter((i) => i.group === g).map((it) => (
+                      <SidebarMenuItem key={it.id}>
+                        <SidebarMenuButton isActive={it.id === props.active} onClick={() => props.onNav(it.id)}>
+                          <Icon name={it.icon} />
+                          <span>{it.label}</span>
+                          <span className="ml-auto font-mono text-[10.5px] text-muted-foreground">{it.hint}</span>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    ))}
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </SidebarGroup>
             ))}
-          </div>
-          {props.children}
-        </main>
-      </div>
-      <Toaster position="bottom-right" maxVisible={3} />
-      <ConfirmDialogHost />
-    </AppFrame>
+          </SidebarContent>
+          <SidebarFooter className="gap-2 border-t p-3">
+            {props.usage && <div className="rounded-lg border bg-background/60 p-3">{props.usage}</div>}
+            <div className="flex items-center gap-1">
+              <ThemeToggle />
+              <div className="flex-1" />
+              <IconButton name="logout" label="退出" onClick={props.onLogout} />
+            </div>
+          </SidebarFooter>
+        </Sidebar>
+        <SidebarInset className="min-h-0 min-w-0 overflow-hidden">{props.children}</SidebarInset>
+        <Toaster position="bottom-right" visibleToasts={3} />
+        <ConfirmDialogHost />
+      </SidebarProvider>
+    </TooltipProvider>
   );
 }
 
-// 页面统一骨架: 顶栏 (标题/面包屑 + 右侧操作) + 可滚动内容
-export function Page({ title, right, children }: { title: ReactNode; right?: ReactNode; children: ReactNode }) {
+/**
+ * 页面骨架: 顶栏 (手机上的侧栏开关 + 眉标) / 标题区 (大标题, 说明, 右侧操作) / 可滚动内容。
+ * eyebrow 是一串路径段, 最后一段高亮; 传 onEyebrow 时前面的段可点。
+ */
+export function Page({ eyebrow, title, description, right, toolbar, children }: {
+  eyebrow?: ReactNode;
+  title: ReactNode;
+  description?: ReactNode;
+  right?: ReactNode;
+  toolbar?: ReactNode;
+  children: ReactNode;
+}) {
   return (
-    <>
-      <header className="flex min-h-14 flex-wrap items-center gap-3 border-b border-border/40 px-5 py-2">
-        <div className="min-w-0 flex-1 text-[15px] font-semibold">{title}</div>
-        {right && <div className="flex flex-wrap items-center gap-2">{right}</div>}
+    <div className="flex h-full min-h-0 flex-col">
+      <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4 md:px-8">
+        <SidebarTrigger className="-ml-1 md:hidden" />
+        <div className="flex min-w-0 flex-1 items-center gap-2 font-mono text-xs text-muted-foreground">
+          <span className="size-1.5 shrink-0 rounded-full bg-brand" />
+          {eyebrow}
+        </div>
+        {toolbar}
       </header>
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">{children}</div>
-    </>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-8 md:px-8">
+          <div className="flex flex-wrap items-end gap-4">
+            <div className="min-w-0 flex-1">
+              <h1 className="text-3xl font-semibold tracking-tight md:text-4xl">{title}</h1>
+              {description && <p className="mt-2 max-w-2xl text-sm text-muted-foreground">{description}</p>}
+            </div>
+            {right && <div className="flex flex-wrap items-center gap-2">{right}</div>}
+          </div>
+          {children}
+        </div>
+      </div>
+    </div>
   );
 }

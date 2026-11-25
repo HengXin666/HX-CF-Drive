@@ -1,56 +1,70 @@
-// 图标统一走 Iconify Solar (SVG 蒙版)。类名必须写成字面量, Tailwind 才能扫到并生成
+// 图标统一用 lucide (与 HX-UI 一致)。页面按名字取, 换图标只改这里
+import {
+  ArrowLeft, BookOpen, Check, ChevronRight, CircleAlert, Copy, Cpu, Database, Download, Eye, FileArchive, FileCode2,
+  FileText, Film, Folder, FolderInput, FolderOpen, FolderPlus, FolderTree, House, Image, KeyRound, Link2, Lock, LogOut, type LucideIcon,
+  Moon, Music, MoreHorizontal, Pencil, Plus, RefreshCw, RotateCcw, Search, Send, Server, Settings, Share2, ShieldCheck,
+  Sun, Trash2, Upload, X, Info, Rocket, HardDrive,
+} from 'lucide-react';
+
 export const ICON = {
-  logo: 'icon-[solar--cloud-storage-linear]',
-  files: 'icon-[solar--folder-with-files-linear]',
-  trash: 'icon-[solar--trash-bin-trash-linear]',
-  share: 'icon-[solar--share-linear]',
-  admin: 'icon-[solar--settings-linear]',
-  docs: 'icon-[solar--book-linear]',
-  logout: 'icon-[solar--logout-2-linear]',
-  upload: 'icon-[solar--upload-minimalistic-linear]',
-  download: 'icon-[solar--download-minimalistic-linear]',
-  newFolder: 'icon-[solar--add-folder-linear]',
-  search: 'icon-[solar--magnifier-linear]',
-  link: 'icon-[solar--link-linear]',
-  rename: 'icon-[solar--pen-linear]',
-  move: 'icon-[solar--transfer-horizontal-linear]',
-  restore: 'icon-[solar--restart-linear]',
-  copy: 'icon-[solar--copy-linear]',
-  close: 'icon-[solar--close-circle-linear]',
-  more: 'icon-[solar--menu-dots-linear]',
-  home: 'icon-[solar--home-2-linear]',
-  chevron: 'icon-[solar--alt-arrow-right-linear]',
-  refresh: 'icon-[solar--refresh-linear]',
-  eye: 'icon-[solar--eye-linear]',
-  key: 'icon-[solar--key-linear]',
-  lock: 'icon-[solar--lock-keyhole-linear]',
-  server: 'icon-[solar--server-square-linear]',
-  database: 'icon-[solar--database-linear]',
-  plane: 'icon-[solar--plain-linear]',
-  palette: 'icon-[solar--palette-linear]',
-  code: 'icon-[solar--code-square-linear]',
-  bolt: 'icon-[solar--cpu-bolt-linear]',
-  check: 'icon-[solar--check-circle-linear]',
-  warn: 'icon-[solar--danger-triangle-linear]',
-  folder: 'icon-[solar--folder-linear]',
-  fileText: 'icon-[solar--file-text-linear]',
-  image: 'icon-[solar--gallery-linear]',
-  video: 'icon-[solar--videocamera-record-linear]',
-  audio: 'icon-[solar--music-note-linear]',
-  pdf: 'icon-[solar--document-linear]',
-  zip: 'icon-[solar--zip-file-linear]',
-} as const;
+  logo: HardDrive,
+  files: FolderOpen,
+  trash: Trash2,
+  share: Share2,
+  admin: Settings,
+  docs: BookOpen,
+  logout: LogOut,
+  upload: Upload,
+  download: Download,
+  newFolder: FolderPlus,
+  add: Plus,
+  search: Search,
+  link: Link2,
+  rename: Pencil,
+  move: FolderInput,
+  tree: FolderTree,
+  restore: RotateCcw,
+  copy: Copy,
+  close: X,
+  more: MoreHorizontal,
+  home: House,
+  chevron: ChevronRight,
+  back: ArrowLeft,
+  refresh: RefreshCw,
+  eye: Eye,
+  key: KeyRound,
+  lock: Lock,
+  shield: ShieldCheck,
+  server: Server,
+  database: Database,
+  plane: Send,
+  code: FileCode2,
+  bolt: Cpu,
+  check: Check,
+  warn: CircleAlert,
+  info: Info,
+  rocket: Rocket,
+  sun: Sun,
+  moon: Moon,
+  folder: Folder,
+  fileText: FileText,
+  image: Image,
+  video: Film,
+  audio: Music,
+  pdf: FileText,
+  zip: FileArchive,
+} satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof ICON;
 
-// 按类型给文件配图标和颜色
-export function fileIcon(kind: 'dir' | 'file', mime: string | null, name: string): { icon: string; tone: string } {
-  if (kind === 'dir') return { icon: ICON.folder, tone: 'text-amber-300' };
+// 按类型给文件配图标和颜色; 颜色用低饱和色, 亮暗两套主题都看得清
+export function fileIcon(kind: 'dir' | 'file', mime: string | null, name: string): { icon: LucideIcon; tone: string } {
+  if (kind === 'dir') return { icon: ICON.folder, tone: 'text-amber-500 dark:text-amber-400' };
   const m = mime ?? '';
-  if (m.startsWith('image/')) return { icon: ICON.image, tone: 'text-sky-300' };
-  if (m.startsWith('video/')) return { icon: ICON.video, tone: 'text-violet-300' };
-  if (m.startsWith('audio/')) return { icon: ICON.audio, tone: 'text-pink-300' };
-  if (m === 'application/pdf') return { icon: ICON.pdf, tone: 'text-rose-300' };
-  if (/\.(zip|7z|rar|tar|gz|xz|zst)$/i.test(name)) return { icon: ICON.zip, tone: 'text-orange-300' };
+  if (m.startsWith('image/')) return { icon: ICON.image, tone: 'text-sky-500 dark:text-sky-400' };
+  if (m.startsWith('video/')) return { icon: ICON.video, tone: 'text-violet-500 dark:text-violet-400' };
+  if (m.startsWith('audio/')) return { icon: ICON.audio, tone: 'text-pink-500 dark:text-pink-400' };
+  if (m === 'application/pdf') return { icon: ICON.pdf, tone: 'text-rose-500 dark:text-rose-400' };
+  if (/\.(zip|7z|rar|tar|gz|xz|zst)$/i.test(name)) return { icon: ICON.zip, tone: 'text-orange-500 dark:text-orange-400' };
   return { icon: ICON.fileText, tone: 'text-muted-foreground' };
 }

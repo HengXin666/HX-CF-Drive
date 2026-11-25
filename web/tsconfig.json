@@ -16,12 +16,7 @@
     "noUnusedLocals": true,
     "types": [
       "vite/client"
-    ],
-    "paths": {
-      "@hx/ui-dist/*": [
-        "./node_modules/@hx/ui/dist/*"
-      ]
-    }
+    ]
   },
   "include": [
     "src"

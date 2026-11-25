@@ -59,7 +59,7 @@ export function UploadQueue({ q }: { q: ReturnType<typeof useUploadQueue> }) {
   useEffect(() => { if (q.items.some((x) => x.p.phase !== 'done')) setOpen(true); }, [q.items]);
   if (!q.items.length) return null;
   return (
-    <div className="fixed bottom-4 right-4 z-40 w-96 rounded-xl border border-border bg-background p-3 shadow-lg">
+    <div className="fixed right-4 bottom-4 z-40 w-96 max-w-[calc(100vw-2rem)] rounded-xl border bg-popover p-3 text-popover-foreground shadow-float">
       <div className="mb-2 flex items-center justify-between text-sm font-medium">
         <span>上传 ({q.items.filter((x) => x.p.phase === 'done').length}/{q.items.length})</span>
         <div className="flex gap-1">
@@ -73,13 +73,13 @@ export function UploadQueue({ q }: { q: ReturnType<typeof useUploadQueue> }) {
             <li key={it.id} className="text-xs">
               <div className="flex justify-between gap-2">
                 <span className="truncate">{it.opts?.name ?? it.file.name}</span>
-                <span className="shrink-0 text-muted-foreground">
+                <span className="shrink-0 font-mono text-muted-foreground">
                   {fmtSize(it.file.size)} · {it.p.note ?? PHASE[it.p.phase]}
                 </span>
               </div>
-              {it.p.phase !== 'done' && <Progress className="mt-1" value={it.p.ratio * 100} />}
+              {it.p.phase !== 'done' && <Progress className="mt-1.5" size="sm" tone={it.error ? 'destructive' : 'default'} value={it.p.ratio * 100} />}
               {it.error && (
-                <div className="mt-1 flex items-center justify-between gap-2 text-danger-fg">
+                <div className="mt-1 flex items-center justify-between gap-2 text-destructive">
                   <span className="truncate">{it.error}</span>
                   <div className="flex shrink-0 gap-1">
                     {it.conflict ? (

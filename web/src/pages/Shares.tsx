@@ -2,8 +2,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Icon, IconButton } from '../components/Icon';
 import { Page } from '../components/Shell';
+import { type Column, DataTable } from '../components/Table';
 import { fmtTime, type ShareRow, shares } from '../lib/api';
-import { Badge, DataTable, type DataTableColumn, toast } from '../ui';
+import { Badge, toast } from '../ui';
 
 export function Shares() {
   const [rows, setRows] = useState<ShareRow[]>([]);
@@ -30,14 +31,17 @@ export function Shares() {
       toast.error((e as Error).message);
     }
   };
-  const columns: DataTableColumn<ShareRow>[] = [
-    { key: 'name', header: '文件', render: (s) => <span className="flex items-center gap-2.5"><Icon name="share" className="size-4 text-link" />{s.name}</span> },
-    { key: 'pw', header: '访问', width: '90px', render: (s) => (s.has_password
-      ? <Badge variant="warning"><Icon name="lock" className="size-3" /> 密码</Badge>
-      : <Badge variant="secondary">公开</Badge>) },
-    { key: 'exp', header: '过期', width: '170px', render: (s) => <span className="text-muted-foreground tabular-nums">{s.expires_at ? fmtTime(s.expires_at) : '永久'}</span> },
-    { key: 'at', header: '创建', width: '170px', render: (s) => <span className="text-muted-foreground tabular-nums">{fmtTime(s.created_at)}</span> },
-    { key: 'op', header: '', width: '80px', align: 'right', render: (s) => (
+  const columns: Column<ShareRow>[] = [
+    { key: 'name', header: '文件', sort: (s) => s.name.toLowerCase(),
+      render: (s) => <span className="flex min-w-0 items-center gap-2.5"><Icon name="share" className="text-brand" /><span className="truncate">{s.name}</span></span> },
+    { key: 'pw', header: '访问', render: (s) => (s.has_password
+      ? <Badge variant="outline" dot="warning">密码</Badge>
+      : <Badge variant="outline" dot="success">公开</Badge>) },
+    { key: 'exp', header: '过期', hideOnMobile: true, sort: (s) => s.expires_at ?? Number.MAX_SAFE_INTEGER,
+      render: (s) => <span className="whitespace-nowrap tabular-nums text-muted-foreground">{s.expires_at ? fmtTime(s.expires_at) : '永久'}</span> },
+    { key: 'at', header: '创建', hideOnMobile: true, sort: (s) => s.created_at,
+      render: (s) => <span className="whitespace-nowrap tabular-nums text-muted-foreground">{fmtTime(s.created_at)}</span> },
+    { key: 'op', header: '', align: 'right', render: (s) => (
       <div className="flex justify-end gap-0.5">
         <IconButton name="copy" label="复制链接" onClick={() => void navigator.clipboard.writeText(url(s.id)).then(() => toast.success('链接已复制'))} />
         <IconButton name="trash" label="撤销" danger onClick={() => void revoke(s)} />
@@ -46,7 +50,11 @@ export function Shares() {
   ];
 
   return (
-    <Page title="分享" right={<span className="text-[12.5px] text-muted-foreground">在文件列表里创建, 撤销后链接立即失效</span>}>
+    <Page
+      eyebrow={<span>网盘 / <span className="text-foreground">shares</span></span>}
+      title="分享"
+      description="在文件列表里创建分享; 撤销后链接立即失效。"
+    >
       <DataTable columns={columns} rows={rows} rowKey={(s) => s.id} loading={loading} emptyText="还没有分享" />
     </Page>
   );

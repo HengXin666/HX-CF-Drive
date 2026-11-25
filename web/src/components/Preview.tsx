@@ -12,7 +12,7 @@ function TextView({ url }: { url: string }) {
   useEffect(() => {
     fetch(url, { headers: { Range: 'bytes=0-262143' } }).then((r) => r.text()).then(setText, (e) => setText(String(e)));
   }, [url]);
-  return <pre className="max-h-[70vh] overflow-auto rounded-lg bg-background/60 p-4 font-mono text-[12.5px] leading-relaxed whitespace-pre-wrap">{text}</pre>;
+  return <pre className="max-h-[70vh] overflow-auto rounded-lg border bg-muted/40 p-4 font-mono text-[12.5px] leading-relaxed whitespace-pre-wrap">{text}</pre>;
 }
 
 export function Preview({ target, onClose, onDownload }: { target: PreviewTarget | null; onClose: () => void; onDownload: (n: Node) => void }) {
@@ -25,7 +25,7 @@ export function Preview({ target, onClose, onDownload }: { target: PreviewTarget
         <DialogHeader>
           <DialogTitle className="flex items-center gap-3 pr-8">
             <span className="min-w-0 flex-1 truncate">{target?.node.name}</span>
-            <span className="text-xs font-normal text-muted-foreground">{target && fmtSize(target.node.size)}</span>
+            <span className="font-mono text-xs font-normal text-muted-foreground">{target && fmtSize(target.node.size)}</span>
             {target && (
               <Button size="sm" variant="outline" onClick={() => onDownload(target.node)}>
                 <Icon name="download" /> 下载

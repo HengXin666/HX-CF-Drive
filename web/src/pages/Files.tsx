@@ -1,16 +1,17 @@
-// 文件浏览: 面包屑, 上传 (拖放/选择), 新建目录, 搜索, 预览, 下载, 直链, 分享, 重命名, 移动, 删除
+// 文件浏览: 路径眉标, 上传 (拖放/选择), 新建目录, 搜索, 预览, 下载, 直链, 分享, 重命名, 移动 (目录树), 删除, 多选批量操作
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Icon, IconButton } from '../components/Icon';
+import { MoveDialog } from '../components/MoveDialog';
 import { Preview, type PreviewTarget } from '../components/Preview';
 import { PromptDialog, type PromptRequest } from '../components/PromptDialog';
 import { Page } from '../components/Shell';
+import { type Column, DataTable } from '../components/Table';
 import { UploadQueue, useUploadQueue } from '../components/UploadQueue';
 import { fileIcon } from '../icons';
 import { admin, ApiError, fmtSize, fmtTime, fs, joinPath, type Node, shares, type TokenRow } from '../lib/api';
 import { download } from '../lib/transfer';
 import {
-  Button, confirmDialog, DataTable, type DataTableColumn, DropdownMenu, DropdownMenuContent, DropdownMenuItem,
-  DropdownMenuSeparator, DropdownMenuTrigger, Input, toast,
+  Button, cn, confirmDialog, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger, Input, toast,
 } from '../ui';
 
 const parentOf = (p: string) => p.replace(/\/[^/]+\/?$/, '') || '/';
@@ -25,25 +26,24 @@ function tokensAt(tokens: TokenRow[], p: string) {
   const scoped = tokens.filter((t) => t.root_path && t.root_path !== '/');
   return { inside: scoped.filter((t) => within(p, t.root_path) && p !== t.root_path), holds: scoped.filter((t) => within(t.root_path, p)) };
 }
-const names = (ts: TokenRow[]) => ts.map((t) => `${t.name} (${t.root_path})`).join(', ');
+const names = (ts: TokenRow[]) => [...new Set(ts.map((t) => `${t.name} (${t.root_path})`))].join(', ');
 
 async function copy(text: string, what: string) {
   await navigator.clipboard.writeText(text);
   toast.success(`${what}已复制`);
 }
 
+/** 顶栏路径: 每段可点, 与 HX-UI 文档站的眉标同款 */
 function Crumbs({ path, go }: { path: string; go: (p: string) => void }) {
   const parts = path.split('/').filter(Boolean);
-  const cls = 'rounded-md px-1.5 py-0.5 hover:bg-accent';
+  const seg = 'rounded px-1 py-0.5 transition-colors hover:bg-accent hover:text-foreground';
   return (
-    <nav className="flex min-w-0 flex-wrap items-center gap-0.5 text-[13px]">
-      <button type="button" className={`${cls} flex items-center gap-1.5 ${parts.length ? 'text-muted-foreground' : ''}`} onClick={() => go('/')}>
-        <Icon name="home" /> 全部文件
-      </button>
+    <nav aria-label="路径" className="flex min-w-0 items-center gap-0.5 overflow-hidden">
+      <button type="button" className={cn(seg, parts.length === 0 ? 'text-brand' : '')} onClick={() => go('/')}>文件</button>
       {parts.map((c, i) => (
-        <span key={i} className="flex items-center gap-0.5">
-          <Icon name="chevron" className="size-3.5 text-muted-foreground/60" />
-          <button type="button" className={`${cls} ${i < parts.length - 1 ? 'text-muted-foreground' : ''}`}
+        <span key={i} className="flex min-w-0 items-center gap-0.5">
+          <span className="opacity-50">/</span>
+          <button type="button" className={cn(seg, 'truncate', i === parts.length - 1 && 'text-foreground')}
             onClick={() => go('/' + parts.slice(0, i + 1).join('/'))}>{c}</button>
         </span>
       ))}
@@ -51,12 +51,15 @@ function Crumbs({ path, go }: { path: string; go: (p: string) => void }) {
   );
 }
 
+type Item = Node & { fullPath: string };
+
 export function Files({ path, go, onChange }: { path: string; go: (p: string) => void; onChange: () => void }) {
   const [rows, setRows] = useState<Node[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState('');
   const [searching, setSearching] = useState<Node[] | null>(null);
   const [prompt, setPrompt] = useState<PromptRequest | null>(null);
+  const [moving, setMoving] = useState<Item[] | null>(null);
   const [preview, setPreview] = useState<PreviewTarget | null>(null);
   const [drag, setDrag] = useState(false);
   const picker = useRef<HTMLInputElement>(null);
@@ -89,12 +92,13 @@ export function Files({ path, go, onChange }: { path: string; go: (p: string) =>
     }
   };
 
+  const full = (n: Node): Item => ({ ...n, fullPath: n.path ?? joinPath(path, n.name) });
   const save = async (n: Node) => {
     const { url } = await fs.link(n.id, 3600);
     await download(url, n.name, n.size, () => {});
   };
   const open = async (n: Node) => {
-    if (n.kind === 'dir') { go(n.path ?? joinPath(path, n.name)); return; }
+    if (n.kind === 'dir') { go(full(n).fullPath); return; }
     const { url } = await fs.link(n.id, 3600);
     if (/^(image|video|audio)\//.test(n.mime ?? '') || n.mime === 'application/pdf' || n.mime?.startsWith('text/')) setPreview({ node: n, url });
     else await download(url, n.name, n.size, () => {});
@@ -104,140 +108,139 @@ export function Files({ path, go, onChange }: { path: string; go: (p: string) =>
     try {
       await fn();
       if (ok) toast.success(ok);
-      changed();
     } catch (e) {
       toast.error((e as Error).message);
+    } finally {
+      changed();
     }
   };
 
   const share = (n: Node) => setPrompt({
     title: `分享 ${n.name}`,
-    fields: [{ key: 'pw', label: '密码 (留空则公开)' }, { key: 'days', label: '有效天数 (留空为永久)', type: 'number' }],
+    fields: [{ key: 'pw', label: '密码', description: '留空则任何拿到链接的人都能看', type: 'password' }, { key: 'days', label: '有效天数', description: '留空为永久', type: 'number' }],
     okText: '创建并复制链接',
     onOk: async (v) => {
       const r = await shares.create(n.id, v.pw || undefined, v.days ? Number(v.days) * 86400 : undefined);
       await copy(r.url, '分享链接');
     },
   });
-  const pathOfNode = (n: Node) => n.path ?? joinPath(path, n.name);
+
   /** 删除或移出令牌根目录时的提醒; 没有受影响的令牌返回空串 */
-  const tokenWarn = (n: Node, verb: string) => {
-    const { inside, holds } = tokensAt(tokens, pathOfNode(n));
-    if (holds.length) return `这是令牌 ${names(holds)} 的根目录或包含它, ${verb}后这些令牌的服务会找不到其中所有文件, 新上传也会失败。`;
-    if (inside.length) return `位于令牌 ${names(inside)} 的根目录里, ${verb}后持有令牌的服务会找不到它 (在目录内改名, 移动不受影响)。`;
+  const tokenWarn = (items: Item[], verb: string) => {
+    const inside = items.flatMap((n) => tokensAt(tokens, n.fullPath).inside);
+    const holds = items.flatMap((n) => tokensAt(tokens, n.fullPath).holds);
+    if (holds.length) return `其中包含令牌 ${names(holds)} 的根目录, ${verb}后这些令牌的服务会找不到里面所有文件, 新上传也会失败。`;
+    if (inside.length) return `位于令牌 ${names(inside)} 的根目录里, ${verb}后持有令牌的服务会找不到 (在目录内改名, 移动不受影响)。`;
     return '';
   };
-  const remove = async (n: Node) => {
-    const warn = tokenWarn(n, '删除');
-    if (n.kind === 'dir') {
-      // 目录: 像删 GitHub 仓库一样手动输入目录名确认
-      setPrompt({
-        title: `删除目录 ${n.name}?`,
-        note: `目录和里面的所有内容都会放进回收站, 保留期内可以恢复。${warn ? '\n' + warn : ''}`,
-        fields: [{ key: 'confirm', label: `输入目录名 ${n.name} 确认`, placeholder: n.name }],
-        okText: '删除',
-        danger: true,
-        onOk: async (v) => {
-          if (v.confirm.trim() !== n.name) throw new Error('目录名不一致');
-          await act(() => fs.remove(n.id), '已移入回收站');
-        },
-      });
-      return;
-    }
-    if (await confirmDialog({ title: `删除 ${n.name}?`, message: `会放进回收站, 保留期内可以恢复。${warn ? ' ' + warn : ''}`, confirmLabel: '删除', variant: 'danger' })) {
-      await act(() => fs.remove(n.id), '已移入回收站');
-    }
+
+  const remove = async (items: Item[], clear?: () => void) => {
+    if (!items.length) return;
+    const dirs = items.filter((n) => n.kind === 'dir');
+    const one = items.length === 1 ? items[0] : null;
+    const warn = tokenWarn(items, '删除');
+    const ok = await confirmDialog({
+      title: one ? `删除${one.kind === 'dir' ? '目录' : ''} ${one.name}?` : `删除 ${items.length} 个项目?`,
+      message: [dirs.length ? '目录连同里面的所有内容都会放进回收站, 保留期内可以恢复。' : '会放进回收站, 保留期内可以恢复。', warn].filter(Boolean).join(' '),
+      confirmLabel: '删除',
+      danger: true,
+      // 删目录像删 GitHub 仓库一样手动输入名字确认; 一次删多个时输入 "删除"
+      confirmText: dirs.length ? (one ? one.name : '删除') : undefined,
+    });
+    if (!ok) return;
+    await act(async () => { for (const n of items) await fs.remove(n.id); }, items.length > 1 ? `已把 ${items.length} 项移入回收站` : '已移入回收站');
+    clear?.();
   };
-  /** 移动: 移出令牌根目录时先提醒; 挪动根目录本身不影响, 令牌按 id 跟随 */
-  const moveTo = async (n: Node, to: string) => {
-    const { inside } = tokensAt(tokens, pathOfNode(n));
-    const lost = inside.filter((t) => !within(to, t.root_path));
+
+  const moveTo = async (items: Item[], to: string) => {
+    const lost = items.flatMap((n) => tokensAt(tokens, n.fullPath).inside.filter((t) => !within(to, t.root_path)));
     if (lost.length && !(await confirmDialog({
-      title: "移出令牌目录?",
-      message: `${n.name} 位于令牌 ${names(lost)} 的根目录里, 移到 ${to} 后持有令牌的服务会找不到它。`,
+      title: '移出令牌目录?',
+      message: `${items.length === 1 ? items[0].name : `这 ${items.length} 项`}位于令牌 ${names(lost)} 的根目录里, 移到 ${to} 后持有令牌的服务会找不到。`,
       confirmLabel: '仍然移动',
-      variant: 'danger',
+      danger: true,
     }))) return;
-    await act(() => fs.move(n.id, to, n.name), '已移动');
+    const failed: string[] = [];
+    for (const n of items) {
+      try { await fs.move(n.id, to, n.name); } catch (e) { failed.push(`${n.name}: ${(e as Error).message}`); }
+    }
+    changed();
+    if (failed.length) throw new Error(failed.join('\n'));
+    toast.success(items.length > 1 ? `已移动 ${items.length} 项到 ${to}` : `已移动到 ${to}`);
   };
-  const wrap = (fn: () => unknown) => () => { Promise.resolve(fn()).catch((e) => toast.error((e as Error).message)); };
 
-  const item = (icon: Parameters<typeof Icon>[0]['name'], label: string, fn: () => unknown, danger?: boolean) => (
-    <DropdownMenuItem onSelect={wrap(fn)} className={danger ? 'text-danger-fg' : undefined}>
-      <Icon name={icon} className="size-4 opacity-80" /> {label}
-    </DropdownMenuItem>
-  );
-
-  const columns: DataTableColumn<Node>[] = [
-    { key: 'name', header: '名称', render: (n) => {
+  const columns: Column<Node>[] = [
+    { key: 'name', header: '名称', sort: (n) => (n.kind === 'dir' ? '0' : '1') + n.name.toLowerCase(), render: (n) => {
       const fi = fileIcon(n.kind, n.mime, n.name);
       return (
-        <span className="flex min-w-0 items-center gap-2.5">
-          <Icon raw={fi.icon} className={`size-[18px] ${fi.tone}`} />
-          <span className="truncate">{n.name}</span>
-          {searching && n.path && <span className="truncate text-xs text-muted-foreground">{parentOf(n.path)}</span>}
+        <span className="flex min-w-0 items-center gap-2.5 sm:min-w-64">
+          <Icon as={fi.icon} className={fi.tone} />
+          <span className="grid min-w-0">
+            <span className="truncate">{n.name}</span>
+            {/* 窄屏隐藏了大小和时间两列, 放到名字下面 */}
+            <span className="truncate text-xs text-muted-foreground sm:hidden">
+              {n.kind === 'dir' ? '' : `${fmtSize(n.size)} · `}{fmtTime(n.updatedAt)}
+            </span>
+          </span>
+          {searching && n.path && <span className="truncate font-mono text-xs text-muted-foreground">{parentOf(n.path)}</span>}
         </span>
       );
     } },
-    { key: 'size', header: '大小', width: '100px', numeric: true, render: (n) => (n.kind === 'dir' ? <span className="text-muted-foreground">-</span> : fmtSize(n.size)) },
-    { key: 'time', header: '修改时间', width: '170px', render: (n) => <span className="text-muted-foreground tabular-nums">{fmtTime(n.updatedAt)}</span> },
-    { key: 'op', header: '', width: '112px', align: 'right', render: (n) => (
-      <div className="flex justify-end gap-0.5">
-        {n.kind === 'file' && <IconButton name="download" label="下载" onClick={wrap(() => save(n))} />}
-        <IconButton name="share" label="分享" onClick={() => share(n)} />
+    { key: 'size', header: '大小', align: 'right', hideOnMobile: true, sort: (n) => (n.kind === 'dir' ? -1 : n.size),
+      render: (n) => <span className="tabular-nums text-muted-foreground">{n.kind === 'dir' ? '—' : fmtSize(n.size)}</span> },
+    { key: 'time', header: '修改时间', hideOnMobile: true, sort: (n) => n.updatedAt,
+      render: (n) => <span className="whitespace-nowrap tabular-nums text-muted-foreground">{fmtTime(n.updatedAt)}</span> },
+    { key: 'op', header: '', align: 'right', render: (n) => (
+      <div className="flex justify-end gap-0.5" onClick={(e) => e.stopPropagation()}>
+        <span className="hidden gap-0.5 sm:flex">
+          {n.kind === 'file' && <IconButton name="download" label="下载" onClick={() => void save(n).catch((e) => toast.error((e as Error).message))} />}
+          <IconButton name="share" label="分享" onClick={() => share(n)} />
+        </span>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button type="button" aria-label="更多" title="更多" onClick={(e) => e.stopPropagation()}
-              className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground">
-              <Icon name="more" />
-            </button>
+            <Button size="icon-sm" variant="ghost" aria-label="更多" className="text-muted-foreground"><Icon name="more" /></Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
-            {n.kind === 'file' && item('link', '复制永久直链', async () => copy((await fs.link(n.id, 0)).url, '永久直链'))}
-            {item('rename', '重命名', () => setPrompt({
+          <DropdownMenuContent align="end" className="min-w-40">
+            {n.kind === 'file' && <DropdownMenuItem className="sm:hidden" onSelect={() => void save(n).catch((e) => toast.error((e as Error).message))}><Icon name="download" /> 下载</DropdownMenuItem>}
+            <DropdownMenuItem className="sm:hidden" onSelect={() => share(n)}><Icon name="share" /> 分享</DropdownMenuItem>
+            {n.kind === 'file' && (
+              <DropdownMenuItem onSelect={() => void fs.link(n.id, 0).then((r) => copy(r.url, '永久直链'), (e) => toast.error((e as Error).message))}>
+                <Icon name="link" /> 复制永久直链
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem onSelect={() => setPrompt({
               title: '重命名', fields: [{ key: 'name', label: '新名称', value: n.name }],
-              onOk: async (v) => act(() => fs.move(n.id, undefined, v.name.trim())),
-            }))}
-            {item('move', '移动到', () => setPrompt({
-              title: '移动到', fields: [{ key: 'to', label: '目标目录', value: n.path ? parentOf(n.path) : path }],
-              onOk: async (v) => moveTo(n, v.to.trim() || '/'),
-            }))}
+              onOk: async (v) => { await fs.move(n.id, undefined, v.name.trim()); changed(); },
+            })}><Icon name="rename" /> 重命名</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setMoving([full(n)])}><Icon name="move" /> 移动到…</DropdownMenuItem>
             <DropdownMenuSeparator />
-            {item('trash', '删除', () => remove(n), true)}
+            <DropdownMenuItem variant="destructive" onSelect={() => void remove([full(n)])}><Icon name="trash" /> 删除</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
     ) },
   ];
 
+  const here = path.split('/').filter(Boolean).pop();
+  const list = searching ?? rows;
+  const dirCount = list.filter((n) => n.kind === 'dir').length;
+
   return (
     <Page
-      title={<Crumbs path={path} go={go} />}
-      right={
-        <>
-          <form className="relative" onSubmit={(e) => { e.preventDefault(); void runSearch(); }}>
-            <Icon name="search" className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input className="h-8 w-52 pl-8" placeholder="搜索文件名, 回车" value={q} onChange={(e) => setQ(e.target.value)} />
-          </form>
-          <Button size="sm" variant="outline" onClick={() => setPrompt({
-            title: '新建目录', fields: [{ key: 'name', label: '目录名' }],
-            onOk: async (v) => act(() => fs.mkdir(joinPath(path, v.name.trim()))),
-          })}>
-            <Icon name="newFolder" /> 新建目录
-          </Button>
-          <Button size="sm" variant="primary" onClick={() => picker.current?.click()}>
-            <Icon name="upload" /> 上传
-          </Button>
-          <input ref={picker} type="file" multiple hidden onChange={(e) => {
-            if (e.target.files?.length) uploads.add([...e.target.files], path);
-            e.target.value = '';
-          }} />
-        </>
-      }
+      eyebrow={<Crumbs path={path} go={go} />}
+      toolbar={(
+        <form onSubmit={(e) => { e.preventDefault(); void runSearch(); }}>
+          <Input size="sm" className="w-36 sm:w-56" leading={<Icon name="search" />} placeholder="搜索文件名, 回车" value={q} onChange={(e) => setQ(e.target.value)} />
+        </form>
+      )}
+      title={searching ? `“${q}”` : here ?? '全部文件'}
+      description={loading ? '加载中…' : searching
+        ? <>共 {searching.length} 条结果 <button type="button" className="ml-2 text-brand hover:underline" onClick={() => setSearching(null)}>返回目录</button></>
+        : `${dirCount} 个目录 · ${list.length - dirCount} 个文件 · 可以把文件直接拖进来`}
     >
       <div
-        className={`relative flex min-h-full flex-col gap-3 rounded-xl ${drag ? 'outline-2 outline-offset-4 outline-dashed outline-primary/70' : ''}`}
-        onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
+        className={cn('relative rounded-xl transition-shadow', drag && 'ring-2 ring-brand ring-offset-4 ring-offset-background')}
+        onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setDrag(true); } }}
         onDragLeave={() => setDrag(false)}
         onDrop={(e) => {
           e.preventDefault();
@@ -245,22 +248,46 @@ export function Files({ path, go, onChange }: { path: string; go: (p: string) =>
           if (e.dataTransfer.files.length) uploads.add([...e.dataTransfer.files], path);
         }}
       >
-        {searching && (
-          <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
-            <Icon name="search" /> “{q}” 共 {searching.length} 条
-            <Button size="xs" variant="ghost" onClick={() => setSearching(null)}>返回目录</Button>
-          </div>
-        )}
         <DataTable
           columns={columns}
-          rows={searching ?? rows}
+          rows={list}
           rowKey={(n) => n.id}
           loading={loading}
+          selectable
+          toolbar={(
+            <>
+              <Button size="sm" variant="outline" onClick={() => setPrompt({
+                title: '新建目录', fields: [{ key: 'name', label: '目录名' }],
+                onOk: async (v) => { await fs.mkdir(joinPath(path, v.name.trim())); changed(); },
+              })}>
+                <Icon name="newFolder" /> 新建目录
+              </Button>
+              <Button size="sm" onClick={() => picker.current?.click()}>
+                <Icon name="upload" /> 上传
+              </Button>
+              <input ref={picker} type="file" multiple hidden onChange={(e) => {
+                if (e.target.files?.length) uploads.add([...e.target.files], path);
+                e.target.value = '';
+              }} />
+            </>
+          )}
+          bulkActions={(sel, clear) => (
+            <>
+              <Button size="sm" variant="outline" onClick={() => setMoving(sel.map(full))}><Icon name="move" /> 移动到…</Button>
+              <Button size="sm" variant="destructive" onClick={() => void remove(sel.map(full), clear)}><Icon name="trash" /> 删除</Button>
+            </>
+          )}
           onRowClick={(n) => { open(n).catch((e) => toast.error((e as Error).message)); }}
           emptyText={searching ? '没有匹配的文件' : '空目录, 把文件拖进来或点上传'}
         />
       </div>
       <PromptDialog req={prompt} onClose={() => setPrompt(null)} />
+      <MoveDialog
+        nodes={moving}
+        from={moving?.length ? parentOf(moving[0].fullPath) : path}
+        onClose={() => setMoving(null)}
+        onMove={(to) => moveTo(moving ?? [], to)}
+      />
       <Preview target={preview} onClose={() => setPreview(null)} onDownload={(n) => void save(n)} />
       <UploadQueue q={uploads} />
     </Page>

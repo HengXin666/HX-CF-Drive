@@ -33,10 +33,10 @@ function ResetButton() {
   return (
     <>
       <button type="button" className={linkCls} onClick={() => setOpen(true)}>
-        <Icon raw="icon-[solar--restart-linear]" className="size-3.5" /> 重置演示数据
+        <Icon name="restore" className="size-3.5" /> 重置演示数据
       </button>
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className="sm:max-w-sm">
           <DialogHeader><DialogTitle>重置演示数据?</DialogTitle></DialogHeader>
           <p className="text-[13px] leading-relaxed text-muted-foreground">
             会清空你在演示里上传, 修改, 删除的全部内容, 恢复成初始示例数据。数据只在本浏览器里, 不影响任何人。
@@ -53,9 +53,9 @@ function ResetButton() {
 
 export function DemoBanner() {
   return (
-    <div role="note" className="relative z-20 flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-border/40 bg-card/70 px-4 py-1.5 text-[12.5px] backdrop-blur">
+    <div role="note" className="relative z-20 flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b bg-card/80 px-4 py-1.5 text-[12.5px] backdrop-blur">
       <span className="flex min-w-0 items-center gap-2">
-        <Icon raw="icon-[solar--info-circle-linear]" className="size-4 text-link" />
+        <Icon name="info" className="text-brand" />
         <span>
           <b className="font-semibold">纯前端演示</b>
           <span className="text-muted-foreground">: 所有数据只保存在你的浏览器里, 不连接任何后端或 Telegram</span>
@@ -63,10 +63,10 @@ export function DemoBanner() {
       </span>
       <span className="ml-auto flex flex-wrap items-center gap-0.5">
         <a className={linkCls} href={REPO} target="_blank" rel="noreferrer">
-          <Icon raw="icon-[solar--code-square-linear]" className="size-3.5" /> 源码仓库
+          <Icon name="code" className="size-3.5" /> 源码仓库
         </a>
         <a className={linkCls} href={DEPLOY_DOC} target="_blank" rel="noreferrer">
-          <Icon raw="icon-[solar--rocket-2-linear]" className="size-3.5" /> 部署自己的网盘
+          <Icon name="rocket" className="size-3.5" /> 部署自己的网盘
         </a>
         <ResetButton />
       </span>
