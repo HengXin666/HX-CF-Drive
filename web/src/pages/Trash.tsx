@@ -1,7 +1,7 @@
 // 回收站: 列出已删除的顶层节点, 可恢复或彻底删除 (目录连同子项)。超期由定时维护清理
 import { useCallback, useEffect, useState } from 'react';
 import { Icon } from '../components/Icon';
-import { Page } from '../components/Shell';
+import { Meta, Page } from '../components/Shell';
 import { type Column, DataTable } from '../components/Table';
 import { fileIcon } from '../icons';
 import { fmtSize, fmtTime, fs, type Node, type PurgeResult } from '../lib/api';
@@ -69,8 +69,8 @@ export function Trash() {
       render: (n) => <span className="whitespace-nowrap tabular-nums text-muted-foreground">{n.deletedAt ? fmtTime(n.deletedAt) : ''}</span> },
     { key: 'op', header: '', align: 'right', render: (n) => (
       <span className="inline-flex gap-1.5">
-        <Button size="xs" variant="outline" onClick={() => void restore(n)}><Icon name="restore" /> 恢复</Button>
-        <Button size="xs" variant="ghost" className="text-muted-foreground hover:text-destructive" onClick={() => void purge(n)}><Icon name="trash" /> 彻底删除</Button>
+        <Button size="xs" variant="outline" onClick={() => void restore(n)}><Icon name="restore" /><span className="hidden sm:inline">恢复</span></Button>
+        <Button size="xs" variant="ghost" className="text-muted-foreground hover:text-destructive" onClick={() => void purge(n)}><Icon name="trash" /><span className="hidden sm:inline">彻底删除</span></Button>
       </span>
     ) },
   ];
@@ -78,11 +78,12 @@ export function Trash() {
   return (
     <Page
       eyebrow={<span>网盘 / <span className="text-foreground">trash</span></span>}
+      icon="trash"
       title="回收站"
-      description="删除的项目保留 7 天, 之后由定时维护彻底清理。"
-      right={<Button size="sm" variant="outline" disabled={!rows.length} onClick={() => void empty()}><Icon name="trash" /> 清空</Button>}
+      meta={<><Meta icon="fileText">{rows.length} 项</Meta><Meta icon="restore">保留 7 天</Meta></>}
+      right={<Button size="sm" variant="outline" disabled={!rows.length} onClick={() => void empty()}><Icon name="trash" /><span className="hidden sm:inline">清空</span></Button>}
     >
-      <DataTable columns={columns} rows={rows} rowKey={(n) => n.id} loading={loading} emptyText="回收站是空的" />
+      <DataTable columns={columns} rows={rows} rowKey={(n) => n.id} loading={loading} emptyText="回收站是空的" emptyIcon="trash" />
     </Page>
   );
 }

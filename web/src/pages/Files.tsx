@@ -4,7 +4,7 @@ import { Icon, IconButton } from '../components/Icon';
 import { MoveDialog } from '../components/MoveDialog';
 import { Preview, type PreviewTarget } from '../components/Preview';
 import { PromptDialog, type PromptRequest } from '../components/PromptDialog';
-import { Page } from '../components/Shell';
+import { Meta, Page } from '../components/Shell';
 import { type Column, DataTable } from '../components/Table';
 import { UploadQueue, useUploadQueue } from '../components/UploadQueue';
 import { fileIcon } from '../icons';
@@ -33,21 +33,27 @@ async function copy(text: string, what: string) {
   toast.success(`${what}已复制`);
 }
 
-/** 顶栏路径: 每段可点, 与 HX-UI 文档站的眉标同款 */
+/** 顶栏路径: 每段可点; 窄屏只留根和最后两段, 中间折成 … */
 function Crumbs({ path, go }: { path: string; go: (p: string) => void }) {
   const parts = path.split('/').filter(Boolean);
-  const seg = 'rounded px-1 py-0.5 transition-colors hover:bg-accent hover:text-foreground';
+  const seg = 'shrink-0 rounded px-1 py-0.5 transition-colors hover:bg-accent hover:text-foreground';
+  const at = (i: number) => '/' + parts.slice(0, i + 1).join('/');
   return (
     <nav aria-label="路径" className="flex min-w-0 items-center gap-0.5 overflow-hidden">
-      <button type="button" className={cn(seg, parts.length === 0 ? 'text-brand' : '')} onClick={() => go('/')}>文件</button>
-      {parts.map((c, i) => (
-        <span key={i} className="flex min-w-0 items-center gap-0.5">
-          <span className="opacity-50">/</span>
-          <button type="button" className={cn(seg, 'truncate', i === parts.length - 1 && 'text-foreground')}
-            onClick={() => go('/' + parts.slice(0, i + 1).join('/'))}>{c}</button>
-        </span>
-      ))}
-    </nav>
+      <button type="button" aria-label="全部文件" className={cn(seg, 'inline-flex items-center', parts.length === 0 && 'text-brand')} onClick={() => go('/')}>
+        <Icon name="home" className="size-3.5" />
+      </button>
+      {parts.map((c, i) => {
+        const last = i === parts.length - 1;
+        const hideNarrow = parts.length > 2 && i < parts.length - 2;
+        return (
+          <span key={i} className={cn('flex min-w-0 items-center gap-0.5', hideNarrow && 'hidden sm:flex')}>
+            <Icon name="chevron" className="size-3 opacity-50" />
+            <button type="button" className={cn(seg, 'min-w-0 truncate', last && 'text-foreground')} onClick={() => go(at(i))}>{c}</button>
+          </span>
+        );
+      })}
+          </nav>
   );
 }
 
@@ -187,7 +193,7 @@ export function Files({ path, go, onChange }: { path: string; go: (p: string) =>
       );
     } },
     { key: 'size', header: '大小', align: 'right', hideOnMobile: true, sort: (n) => (n.kind === 'dir' ? -1 : n.size),
-      render: (n) => <span className="tabular-nums text-muted-foreground">{n.kind === 'dir' ? '—' : fmtSize(n.size)}</span> },
+      render: (n) => <span className="tabular-nums text-muted-foreground">{n.kind === 'dir' ? '' : fmtSize(n.size)}</span> },
     { key: 'time', header: '修改时间', hideOnMobile: true, sort: (n) => n.updatedAt,
       render: (n) => <span className="whitespace-nowrap tabular-nums text-muted-foreground">{fmtTime(n.updatedAt)}</span> },
     { key: 'op', header: '', align: 'right', render: (n) => (
@@ -228,15 +234,11 @@ export function Files({ path, go, onChange }: { path: string; go: (p: string) =>
   return (
     <Page
       eyebrow={<Crumbs path={path} go={go} />}
-      toolbar={(
-        <form onSubmit={(e) => { e.preventDefault(); void runSearch(); }}>
-          <Input size="sm" className="w-36 sm:w-56" leading={<Icon name="search" />} placeholder="搜索文件名, 回车" value={q} onChange={(e) => setQ(e.target.value)} />
-        </form>
-      )}
-      title={searching ? `“${q}”` : here ?? '全部文件'}
-      description={loading ? '加载中…' : searching
-        ? <>共 {searching.length} 条结果 <button type="button" className="ml-2 text-brand hover:underline" onClick={() => setSearching(null)}>返回目录</button></>
-        : `${dirCount} 个目录 · ${list.length - dirCount} 个文件 · 可以把文件直接拖进来`}
+      icon={searching ? 'search' : path === '/' ? 'files' : 'folder'}
+      title={searching ? `搜索 “${q}”` : here ?? '全部文件'}
+      meta={loading ? '加载中…' : searching
+        ? <><Meta icon="fileText">{searching.length} 条结果</Meta><button type="button" className="inline-flex items-center gap-1 text-brand hover:underline" onClick={() => setSearching(null)}><Icon name="back" className="size-3.5" />返回目录</button></>
+        : <><Meta icon="folder">{dirCount}</Meta><Meta icon="fileText">{list.length - dirCount}</Meta><span className="hidden items-center gap-1 sm:inline-flex"><Icon name="upload" className="size-3.5" />可直接拖入上传</span></>}
     >
       <div
         className={cn('relative rounded-xl transition-shadow', drag && 'ring-2 ring-brand ring-offset-4 ring-offset-background')}
@@ -256,14 +258,18 @@ export function Files({ path, go, onChange }: { path: string; go: (p: string) =>
           selectable
           toolbar={(
             <>
-              <Button size="sm" variant="outline" onClick={() => setPrompt({
+              <form onSubmit={(e) => { e.preventDefault(); void runSearch(); }}>
+                <Input size="sm" className="w-40 sm:w-60" leading={<Icon name="search" />} placeholder="搜索全部文件" aria-label="搜索全部文件"
+                  value={q} onChange={(e) => setQ(e.target.value)} />
+              </form>
+              <Button size="sm" variant="outline" aria-label="新建目录" onClick={() => setPrompt({
                 title: '新建目录', fields: [{ key: 'name', label: '目录名' }],
                 onOk: async (v) => { await fs.mkdir(joinPath(path, v.name.trim())); changed(); },
               })}>
-                <Icon name="newFolder" /> 新建目录
+                <Icon name="newFolder" /><span className="hidden sm:inline">新建目录</span>
               </Button>
-              <Button size="sm" onClick={() => picker.current?.click()}>
-                <Icon name="upload" /> 上传
+              <Button size="sm" aria-label="上传" onClick={() => picker.current?.click()}>
+                <Icon name="upload" /><span className="hidden sm:inline">上传</span>
               </Button>
               <input ref={picker} type="file" multiple hidden onChange={(e) => {
                 if (e.target.files?.length) uploads.add([...e.target.files], path);
@@ -273,12 +279,13 @@ export function Files({ path, go, onChange }: { path: string; go: (p: string) =>
           )}
           bulkActions={(sel, clear) => (
             <>
-              <Button size="sm" variant="outline" onClick={() => setMoving(sel.map(full))}><Icon name="move" /> 移动到…</Button>
-              <Button size="sm" variant="destructive" onClick={() => void remove(sel.map(full), clear)}><Icon name="trash" /> 删除</Button>
+              <Button size="sm" variant="outline" aria-label="移动到" onClick={() => setMoving(sel.map(full))}><Icon name="move" /><span className="hidden sm:inline">移动到…</span></Button>
+              <Button size="sm" variant="destructive" aria-label="删除" onClick={() => void remove(sel.map(full), clear)}><Icon name="trash" /><span className="hidden sm:inline">删除</span></Button>
             </>
           )}
           onRowClick={(n) => { open(n).catch((e) => toast.error((e as Error).message)); }}
           emptyText={searching ? '没有匹配的文件' : '空目录, 把文件拖进来或点上传'}
+          emptyIcon={searching ? 'search' : 'upload'}
         />
       </div>
       <PromptDialog req={prompt} onClose={() => setPrompt(null)} />

@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Icon, IconButton } from '../components/Icon';
 import { PromptDialog, type PromptRequest } from '../components/PromptDialog';
-import { Page } from '../components/Shell';
+import { Meta, Page } from '../components/Shell';
 import { type Column, DataTable } from '../components/Table';
 import type { IconName } from '../icons';
 import { admin, fmtSize, fmtTime, type Stats, type TokenRow } from '../lib/api';
@@ -16,12 +16,12 @@ const Status = ({ s }: { s: string }) => <Badge variant="outline" dot={dot(s)}>{
 
 function Stat({ icon, label, value, hint }: { icon: IconName; label: string; value: string | number; hint?: string }) {
   return (
-    <Card className="gap-2 p-4">
+    <Card className="gap-1.5 p-3 md:p-4">
       <div className="flex items-center justify-between font-mono text-[11px] text-muted-foreground">
         {label}
         <Icon name={icon} className="size-3.5" />
       </div>
-      <div className="text-2xl font-semibold tabular-nums tracking-tight">{value}</div>
+      <div className="text-xl font-semibold tabular-nums tracking-tight md:text-2xl">{value}</div>
       {hint && <div className="text-xs text-muted-foreground">{hint}</div>}
     </Card>
   );
@@ -63,7 +63,7 @@ export function Admin({ onChange }: { onChange: () => void }) {
 
   const channelCols: Column<Channel>[] = [
     { key: 'id', header: '频道 ID', render: (c) => <code className="font-mono text-xs">{c.id}</code> },
-    { key: 'title', header: '名称', render: (c) => c.title },
+    { key: 'title', header: '名称', hideOnMobile: true, render: (c) => c.title },
     { key: 'status', header: '状态', render: (c) => <Status s={c.status} /> },
     { key: 'op', header: '', align: 'right', render: (c) => (
       <Button size="xs" variant="ghost" onClick={() => void run(() => admin.setChannel(c.id, c.status === 'active' ? 'readonly' : 'active'), '已更新')}>
@@ -74,7 +74,7 @@ export function Admin({ onChange }: { onChange: () => void }) {
   const botCols: Column<Bot>[] = [
     { key: 'name', header: 'Bot', render: (b) => <span className="font-mono text-xs">{b.username ? `@${b.username}` : b.id}</span> },
     { key: 'status', header: '状态', render: (b) => <Status s={b.status} /> },
-    { key: 'err', header: '最近错误', render: (b) => <span className="text-xs text-muted-foreground">{b.last_error ?? ''}</span> },
+    { key: 'err', header: '最近错误', hideOnMobile: true, render: (b) => <span className="text-xs text-muted-foreground">{b.last_error ?? ''}</span> },
     { key: 'op', header: '', align: 'right', render: (b) => (
       <IconButton name="close" label="停用" danger onClick={() => void run(() => admin.removeBot(b.id), '已停用')} />
     ) },
@@ -82,10 +82,10 @@ export function Admin({ onChange }: { onChange: () => void }) {
   const tokenCols: Column<TokenRow>[] = [
     { key: 'name', header: '名称', render: (t) => t.name },
     { key: 'root', header: '根目录', render: (t) => <code className="font-mono text-xs">{t.root_path}</code> },
-    { key: 'scopes', header: '权限', render: (t) => (
+    { key: 'scopes', header: '权限', hideOnMobile: true, render: (t) => (
       <span className="flex flex-wrap gap-1">{t.scopes.split(',').map((s) => <Badge key={s} variant="secondary" className="font-mono">{s.trim()}</Badge>)}</span>
     ) },
-    { key: 'exp', header: '过期', render: (t) => <span className="whitespace-nowrap tabular-nums text-muted-foreground">{t.expires_at ? fmtTime(t.expires_at) : '永久'}</span> },
+    { key: 'exp', header: '过期', hideOnMobile: true, render: (t) => <span className="whitespace-nowrap tabular-nums text-muted-foreground">{t.expires_at ? fmtTime(t.expires_at) : '永久'}</span> },
     { key: 'op', header: '', align: 'right', render: (t) => (
       <IconButton name="trash" label="删除" danger onClick={() => void run(() => admin.removeToken(t.id), '已删除')} />
     ) },
@@ -94,11 +94,12 @@ export function Admin({ onChange }: { onChange: () => void }) {
   return (
     <Page
       eyebrow={<span>管理 / <span className="text-foreground">admin</span></span>}
+      icon="admin"
       title="后台"
-      description="频道与 Bot 决定文件存到哪; API 令牌给其他服务用, 可以限定根目录与权限。"
-      right={<Button size="sm" variant="outline" loading={busy} onClick={() => { setBusy(true); void run(admin.maintenance, '维护完成').finally(() => setBusy(false)); }}><Icon name="refresh" /> 立即维护</Button>}
+      meta={<><Meta icon="plane">频道与 Bot</Meta><Meta icon="key">API 令牌</Meta></>}
+      right={<Button size="sm" variant="outline" loading={busy} onClick={() => { setBusy(true); void run(admin.maintenance, '维护完成').finally(() => setBusy(false)); }}><Icon name="refresh" /><span className="hidden sm:inline">立即维护</span></Button>}
     >
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 md:gap-3 lg:grid-cols-4">
         <Stat icon="fileText" label="文件" value={count('file')} />
         <Stat icon="folder" label="目录" value={count('dir')} />
         <Stat icon="database" label="去重后占用" value={fmtSize(stats?.blobs.bytes ?? 0)} hint={`${stats?.blobs.n ?? 0} 个数据块`} />
@@ -115,7 +116,7 @@ export function Admin({ onChange }: { onChange: () => void }) {
           <Button size="sm" variant="outline" onClick={() => setPrompt({
             title: '添加频道', fields: [{ key: 'id', label: '频道 ID', placeholder: '-100xxxxxxxxxx' }],
             onOk: async (v) => { const r = await admin.addChannel(v.id.trim()); report(r.bots); await load(); },
-          })}><Icon name="add" /> 添加</Button>
+          })}><Icon name="add" /><span className="hidden sm:inline">添加</span></Button>
         }
       />
       <DataTable
@@ -128,7 +129,7 @@ export function Admin({ onChange }: { onChange: () => void }) {
           <Button size="sm" variant="outline" onClick={() => setPrompt({
             title: '添加 Bot', fields: [{ key: 'token', label: 'Bot Token', type: 'password' }],
             onOk: async (v) => { const r = await admin.addBot(v.token.trim()); report(r.channels); await load(); },
-          })}><Icon name="add" /> 添加</Button>
+          })}><Icon name="add" /><span className="hidden sm:inline">添加</span></Button>
         }
       />
       <DataTable
@@ -152,7 +153,7 @@ export function Admin({ onChange }: { onChange: () => void }) {
               toast.success('令牌已复制到剪贴板, 只显示这一次', { duration: 8000 });
               await load();
             },
-          })}><Icon name="add" /> 新建</Button>
+          })}><Icon name="add" /><span className="hidden sm:inline">新建</span></Button>
         }
       />
       <PromptDialog req={prompt} onClose={() => setPrompt(null)} />

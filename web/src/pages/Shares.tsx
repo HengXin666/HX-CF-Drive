@@ -1,7 +1,7 @@
 // 分享管理: 列出分享链接, 复制, 撤销
 import { useCallback, useEffect, useState } from 'react';
 import { Icon, IconButton } from '../components/Icon';
-import { Page } from '../components/Shell';
+import { Meta, Page } from '../components/Shell';
 import { type Column, DataTable } from '../components/Table';
 import { fmtTime, type ShareRow, shares } from '../lib/api';
 import { Badge, toast } from '../ui';
@@ -52,10 +52,11 @@ export function Shares() {
   return (
     <Page
       eyebrow={<span>网盘 / <span className="text-foreground">shares</span></span>}
+      icon="share"
       title="分享"
-      description="在文件列表里创建分享; 撤销后链接立即失效。"
+      meta={<><Meta icon="link">{rows.length} 个链接</Meta><span className="hidden sm:inline">撤销后立即失效</span></>}
     >
-      <DataTable columns={columns} rows={rows} rowKey={(s) => s.id} loading={loading} emptyText="还没有分享" />
+      <DataTable columns={columns} rows={rows} rowKey={(s) => s.id} loading={loading} emptyText="还没有分享, 在文件列表里创建" emptyIcon="share" />
     </Page>
   );
 }

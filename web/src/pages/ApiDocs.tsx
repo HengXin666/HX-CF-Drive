@@ -1,7 +1,7 @@
 // 接口文档: 认证方式, 接口清单 (可复制 curl), Agent 接入入口
 import { useState } from 'react';
 import { Icon } from '../components/Icon';
-import { Page } from '../components/Shell';
+import { Meta, Page } from '../components/Shell';
 import { curlOf, type Endpoint, GROUPS, type Method } from '../docs/endpoints';
 import { Badge, Button, Card, toast } from '../ui';
 
@@ -59,12 +59,13 @@ export function ApiDocs() {
   return (
     <Page
       eyebrow={<span>管理 / <span className="text-foreground">api</span></span>}
+      icon="docs"
       title="接口文档"
-      description="REST 接口, WebDAV 与 Agent 接入方式。点开一行看请求体, 返回与可复制的 curl。"
+      meta={<><Meta icon="code">REST</Meta><Meta icon="server">WebDAV</Meta><Meta icon="bolt">Agent</Meta></>}
       right={
         <>
-          <Button size="sm" variant="outline" onClick={() => window.open(`${import.meta.env.BASE_URL}llms.txt`, '_blank')}><Icon name="fileText" /> llms.txt</Button>
-          <Button size="sm" onClick={() => window.open(`${import.meta.env.BASE_URL}skill.md`, '_blank')}><Icon name="bolt" /> Agent Skill</Button>
+          <Button size="sm" variant="outline" onClick={() => window.open(`${import.meta.env.BASE_URL}llms.txt`, '_blank')}><Icon name="fileText" /><span className="hidden sm:inline">llms.txt</span></Button>
+          <Button size="sm" onClick={() => window.open(`${import.meta.env.BASE_URL}skill.md`, '_blank')}><Icon name="bolt" /><span className="hidden sm:inline">Agent Skill</span></Button>
         </>
       }
     >

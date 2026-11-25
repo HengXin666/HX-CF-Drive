@@ -2,7 +2,9 @@
 // 列宽与对齐库里还不支持 (已提 issue), 先在单元格里自己对齐。
 import { type ColumnDef, DataTable as HxTable } from '@hx/ui/data';
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import type { IconName } from '../icons';
 import { cn } from '../ui';
+import { Icon } from './Icon';
 
 export interface Column<T> {
   key: string;
@@ -34,6 +36,7 @@ export function DataTable<T>(props: {
   rowKey: (row: T) => string;
   loading?: boolean;
   emptyText?: string;
+  emptyIcon?: IconName;
   onRowClick?: (row: T) => void;
   title?: string;
   description?: string;
@@ -57,7 +60,12 @@ export function DataTable<T>(props: {
       columns={cols}
       getRowId={(r) => props.rowKey(r)}
       loading={props.loading}
-      empty={props.emptyText}
+      empty={(
+        <span className="flex flex-col items-center gap-2">
+          <span className="grid size-10 place-items-center rounded-full border bg-muted/40"><Icon name={props.emptyIcon ?? 'folder'} className="size-4.5" /></span>
+          {props.emptyText}
+        </span>
+      )}
       onRowClick={props.onRowClick}
       selectable={props.selectable}
       bulkActions={props.bulkActions}

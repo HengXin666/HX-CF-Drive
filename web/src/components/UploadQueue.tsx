@@ -59,7 +59,7 @@ export function UploadQueue({ q }: { q: ReturnType<typeof useUploadQueue> }) {
   useEffect(() => { if (q.items.some((x) => x.p.phase !== 'done')) setOpen(true); }, [q.items]);
   if (!q.items.length) return null;
   return (
-    <div className="fixed right-4 bottom-4 z-40 w-96 max-w-[calc(100vw-2rem)] rounded-xl border bg-popover p-3 text-popover-foreground shadow-float">
+    <div className="fixed inset-x-2 bottom-2 z-40 sm:inset-x-auto sm:right-4 sm:bottom-4 sm:w-96 rounded-xl border bg-popover p-3 text-popover-foreground shadow-float">
       <div className="mb-2 flex items-center justify-between text-sm font-medium">
         <span>上传 ({q.items.filter((x) => x.p.phase === 'done').length}/{q.items.length})</span>
         <div className="flex gap-1">

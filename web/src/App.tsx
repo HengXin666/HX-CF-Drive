@@ -1,4 +1,5 @@
 // 应用入口: 登录门 + hash 路由 (#/files/a/b, #/trash, #/shares, #/admin, #/docs)
+import { File, HardDrive, Send } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { Shell, type NavItem } from './components/Shell';
 import { admin, auth, fmtSize, type Stats } from './lib/api';
@@ -53,10 +54,16 @@ export function App() {
       onNav={(id) => nav(id === 'files' ? '/files/' : `/${id}`)}
       onLogout={() => { auth.clear(); setAuthed(false); }}
       usage={stats && (
-        <div className="grid gap-0.5">
-          <span className="font-mono text-[10.5px] text-muted-foreground">已用 · 去重后</span>
-          <span className="text-lg font-semibold tabular-nums">{fmtSize(stats.blobs.bytes)}</span>
-          <span className="text-xs text-muted-foreground">{fileCount} 个文件 · {stats.channels.length} 个频道</span>
+        <div className="flex items-center gap-3">
+          <span className="grid size-8 shrink-0 place-items-center rounded-md bg-brand-soft text-brand"><HardDrive className="size-4" /></span>
+          <div className="grid min-w-0 leading-tight">
+            <span className="text-sm font-semibold tabular-nums">{fmtSize(stats.blobs.bytes)}</span>
+            <span className="flex items-center gap-2 text-[11px] text-muted-foreground">
+              <span className="inline-flex items-center gap-0.5"><File className="size-3" />{fileCount}</span>
+              <span className="inline-flex items-center gap-0.5"><Send className="size-3" />{stats.channels.length}</span>
+              <span>去重后</span>
+            </span>
+          </div>
         </div>
       )}
     >

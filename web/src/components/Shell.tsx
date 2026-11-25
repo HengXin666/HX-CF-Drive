@@ -3,7 +3,7 @@
 import { useTheme } from '@hx/ui/theme';
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader,
-  SidebarInset, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarTrigger,
+  SidebarInset, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarTrigger, useSidebar,
 } from '@hx/ui/ui/sidebar';
 import { ConfirmDialogHost, Toaster, TooltipProvider } from '../ui';
 import type { ReactNode } from 'react';
@@ -21,6 +21,18 @@ export function ThemeToggle() {
       label={resolved === 'dark' ? '切换到亮色' : '切换到暗色'}
       onClick={() => setMode(resolved === 'dark' ? 'light' : 'dark')}
     />
+  );
+}
+
+// 手机上侧栏是抽屉, 点了条目要收起来
+function NavButton({ item, active, onNav }: { item: NavItem; active: boolean; onNav: (id: string) => void }) {
+  const { isMobile, setOpenMobile } = useSidebar();
+  return (
+    <SidebarMenuButton isActive={active} onClick={() => { onNav(item.id); if (isMobile) setOpenMobile(false); }}>
+      <Icon name={item.icon} />
+      <span>{item.label}</span>
+      <span className="ml-auto font-mono text-[10.5px] text-muted-foreground">{item.hint}</span>
+    </SidebarMenuButton>
   );
 }
 
@@ -53,11 +65,7 @@ export function Shell(props: {
                   <SidebarMenu>
                     {props.items.filter((i) => i.group === g).map((it) => (
                       <SidebarMenuItem key={it.id}>
-                        <SidebarMenuButton isActive={it.id === props.active} onClick={() => props.onNav(it.id)}>
-                          <Icon name={it.icon} />
-                          <span>{it.label}</span>
-                          <span className="ml-auto font-mono text-[10.5px] text-muted-foreground">{it.hint}</span>
-                        </SidebarMenuButton>
+                        <NavButton item={it} active={it.id === props.active} onNav={props.onNav} />
                       </SidebarMenuItem>
                     ))}
                   </SidebarMenu>
@@ -70,7 +78,7 @@ export function Shell(props: {
             <div className="flex items-center gap-1">
               <ThemeToggle />
               <div className="flex-1" />
-              <IconButton name="logout" label="退出" onClick={props.onLogout} />
+              <IconButton name="logout" label="退出登录" onClick={props.onLogout} />
             </div>
           </SidebarFooter>
         </Sidebar>
@@ -83,20 +91,21 @@ export function Shell(props: {
 }
 
 /**
- * 页面骨架: 顶栏 (手机上的侧栏开关 + 眉标) / 标题区 (大标题, 说明, 右侧操作) / 可滚动内容。
- * eyebrow 是一串路径段, 最后一段高亮; 传 onEyebrow 时前面的段可点。
+ * 页面骨架: 顶栏 (手机上的侧栏开关 + 路径眉标 + 右侧小工具) / 标题行 (图标, 标题, 一行元信息, 右侧操作) / 内容。
+ * 标题刻意做小: 这是工具页不是落地页, 空间留给列表。
  */
-export function Page({ eyebrow, title, description, right, toolbar, children }: {
+export function Page({ eyebrow, icon, title, meta, right, toolbar, children }: {
   eyebrow?: ReactNode;
+  icon?: IconName;
   title: ReactNode;
-  description?: ReactNode;
+  meta?: ReactNode;
   right?: ReactNode;
   toolbar?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4 md:px-8">
+      <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3 md:px-6">
         <SidebarTrigger className="-ml-1 md:hidden" />
         <div className="flex min-w-0 flex-1 items-center gap-2 font-mono text-xs text-muted-foreground">
           <span className="size-1.5 shrink-0 rounded-full bg-brand" />
@@ -105,11 +114,18 @@ export function Page({ eyebrow, title, description, right, toolbar, children }: 
         {toolbar}
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-8 md:px-8">
-          <div className="flex flex-wrap items-end gap-4">
-            <div className="min-w-0 flex-1">
-              <h1 className="text-3xl font-semibold tracking-tight md:text-4xl">{title}</h1>
-              {description && <p className="mt-2 max-w-2xl text-sm text-muted-foreground">{description}</p>}
+        <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-3 py-4 md:gap-5 md:px-6 md:py-6">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <div className="flex min-w-0 flex-1 items-center gap-3">
+              {icon && (
+                <span className="grid size-9 shrink-0 place-items-center rounded-lg border bg-muted/40 text-muted-foreground">
+                  <Icon name={icon} />
+                </span>
+              )}
+              <div className="grid min-w-0">
+                <h1 className="truncate text-base font-semibold leading-snug md:text-lg">{title}</h1>
+                {meta && <div className="flex min-w-0 items-center gap-3 truncate text-xs text-muted-foreground">{meta}</div>}
+              </div>
             </div>
             {right && <div className="flex flex-wrap items-center gap-2">{right}</div>}
           </div>
@@ -118,4 +134,9 @@ export function Page({ eyebrow, title, description, right, toolbar, children }: 
       </div>
     </div>
   );
+}
+
+/** 元信息里的一项: 小图标 + 文字 */
+export function Meta({ icon, children }: { icon: IconName; children: ReactNode }) {
+  return <span className="inline-flex shrink-0 items-center gap-1"><Icon name={icon} className="size-3.5" />{children}</span>;
 }
