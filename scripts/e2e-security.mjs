@@ -22,6 +22,7 @@ const raw = async (h, path, name, body, ct) => {
 };
 // 1. 管理员私有文件 + 分享
 const priv = await raw(A, '/private', 'secret.txt', 'TOP SECRET', 'text/plain');
+ok([403, 404].includes((await j('GET', `/api/v1/fs/manifest?id=${priv.data.node.id}`, null, H(aioa))).s), '分片清单只限自己的子树');
 const sh = await j('POST', '/api/v1/shares', { id: priv.data.node.id });
 // 受限令牌列出全部分享
 const ls = await j('GET', '/api/v1/shares', null, H(aioa));

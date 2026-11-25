@@ -65,6 +65,8 @@ ok((await fetch(up.url.replace(/s=[^&]+/, 's=bad'))).status === 403, '篡改签�
 const big = rand(40 * 1024 * 1024);
 const r1 = await chunkUpload(`${P}/files`, 'big.bin', big, 'application/octet-stream');
 ok(r1.chunkCount === 3 && r1.node.size === big.length, 'TG 分片上传 40MB (3 片, 缺片 commit 被拒)');
+const mf = await j('GET', `/api/v1/fs/manifest?id=${r1.node.id}`);
+ok(mf.status === 200 && mf.body.chunks.length === 3 && mf.body.chunks.reduce((a, x) => a + x.size, 0) === big.length && mf.body.chunks.every((x) => x.bot && x.fileId), '分片清单: 每片的 Bot, file_id, 大小');
 const id = r1.node.id;
 const part = await fetch(`${BASE}/api/v1/files/${id}/content`, { headers: { ...H, Range: 'bytes=19922900-19923000' } });
 const pb = Buffer.from(await part.arrayBuffer());

@@ -35,6 +35,7 @@ curl -X POST -H "Authorization: Bearer $ADMIN" -H "Content-Type: application/jso
 | POST | `/api/v1/fs/trash/empty` | 清空回收站 (受限令牌只清自己根下的) |
 | GET | `/api/v1/fs/search?q=&limit=` | 文件名搜索 |
 | POST | `/api/v1/fs/link` `{id, expiresIn}` | 签名直链, expiresIn 秒, 0 为永久 |
+| GET | `/api/v1/fs/manifest?id=` | 分片清单 `{size, chunkSize, chunks: [{bot, fileId, size}]}`; 持有对应 Bot 令牌的客户端可直接从 TG 拉取 (read, 只限自己的子树; file_id 没有 Bot 令牌用不了) |
 | GET | `/api/v1/files/:id/content` | 读取内容, 支持 Range, `?download=1` |
 | POST | `/api/v1/upload?path=&rename=1` | 一次性上传 (multipart 字段 file, 或原始 body + `?name=`) |
 | POST | `/api/v1/uploads` | 分片上传: 初始化, 返回签名凭证 ticket |

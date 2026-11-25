@@ -46,6 +46,7 @@ node scripts/hxd.mjs share /a.zip [密码] [天数]
 | 删除 | `POST /api/v1/fs/delete {"path":"/x"}` (进回收站, 可 restore) |
 | 搜索 | `GET /api/v1/fs/search?q=kw` (每令牌每分钟 6 次) |
 | 直链 | `POST /api/v1/fs/link {"path":"/x","expiresIn":0}` → `{"url"}` |
+| 分片清单 | `GET /api/v1/fs/manifest?id=<id>` → `{"size","chunkSize","chunks":[{"bot","fileId","size"}]}` |
 | 读内容 | `GET /api/v1/files/<id>/content` (支持 Range) |
 | 小文件上传 | `POST /api/v1/upload?path=/dir&rename=1` multipart 字段 `file` |
 | 分享 | `POST /api/v1/shares {"path":"/x","password":"","expiresIn":604800}` |

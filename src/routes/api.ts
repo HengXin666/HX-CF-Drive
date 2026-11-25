@@ -10,7 +10,7 @@ import {
 } from '../lib/tree';
 import { HttpError, newId, now, sha256Hex } from '../lib/util';
 import { runMaintenance } from '../services/maintenance';
-import { serveNode } from '../services/serve';
+import { ensureParts, loadBlob, serveNode } from '../services/serve';
 import { commitUpload, foldReceipts, initUpload, openTicket, putChunk, uploadStream } from '../services/upload';
 import { trash } from './trash';
 
@@ -152,6 +152,25 @@ api.post('/fs/link', requireScope('read'), async (c) => {
   const node = await locate(c, b.id, b.path);
   if (node.kind !== 'file') throw new HttpError(400, 'not a file');
   return c.json({ url: await linkFor(c, node, b.expiresIn ?? 0) });
+});
+
+/**
+ * 分片清单 (只读): 每片的 Bot, TG file_id, 大小。持有对应 Bot 令牌的客户端 (如 AIOA 主人的手机) 可以直接从 TG 并发拉取,
+ * 字节不经过 Worker。file_id 只对上传它的 Bot 有效, 没有 Bot 令牌拿到也下不了, 所以和读内容同权限 (read, 只限自己的子树)。
+ */
+api.get('/fs/manifest', requireScope('read'), async (c) => {
+  const node = await locate(c, c.req.query('id'), c.req.query('path'));
+  if (node.kind !== 'file' || !node.blob_id) throw new HttpError(400, 'not a file');
+  const b = await loadBlob(c.env, node.blob_id);
+  const count = Math.max(1, Math.ceil(b.size / b.chunkSize));
+  await ensureParts(c.env, b, 0, count - 1);
+  const chunks = [];
+  for (let i = 0; i < count && b.size > 0; i++) {
+    const r = b.refs[i];
+    if (!r) throw new HttpError(500, 'manifest incomplete');
+    chunks.push({ bot: r.b, fileId: r.f, size: r.s });
+  }
+  return c.json({ id: node.id, size: b.size, chunkSize: b.chunkSize, chunks });
 });
 
 // ---------------- 读取内容 ----------------

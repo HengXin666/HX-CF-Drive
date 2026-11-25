@@ -233,6 +233,7 @@ node scripts/e2e.mjs             # 端到端冒烟
 - 受限令牌的回收站, 搜索在自己子树里查, 不再被全局 LIMIT 挤掉; 恢复时原目录不在就放回令牌根目录
 - 彻底删除按 blob 年龄分批: 超过 47 小时的不再发注定失败的 `deleteMessages`, 维护结果新增 `tgExpired` / `tgFailed`, 能看到留在频道里的消息数
 - 同一张上传凭证重复提交返回 409 (以前是 500)
+- 新增只读接口 `GET /api/v1/fs/manifest?id=`: 返回每片的 Bot, TG file_id 与大小, 持有对应 Bot 令牌的客户端可以直接从 TG 并发拉取, 字节不经过 Worker (read 权限, 只限自己的子树)
 - 分享密码连续错 10 次锁 15 分钟 (状态在 D1, 多 isolate 绕不过); 密码优先从 `X-Share-Password` 头读
 - 新 scope `stats`: 只能读 `/admin/stats` (不含 Bot 报错与频道细节), 给别的服务看用量; stats 新增累计计数 `tg_expired` / `tg_failed`
 - 下载时预取下一片, 片与片之间不再串行等一个 TG 往返 (同时最多 2 个 TG 连接, 子请求数不变)
