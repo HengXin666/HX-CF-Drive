@@ -178,6 +178,15 @@ export async function purgeAll(env: Env, tgBudget: number, maxNodes = 400): Prom
   const out: PurgeStats = { nodes: 0, blobs: 0, tgDeletes: 0, tgCalls: 0, tgExpired: 0, tgFailed: 0 };
   out.nodes = await purgeNodes(env, maxNodes);
   await purgeBlobs(env, tgBudget, out);
+  await bumpCounters(env, { tg_expired: out.tgExpired, tg_failed: out.tgFailed });
   const left = await backlog(env);
   return { ...out, ...left, more: left.leftNodes || left.leftBlobs ? 1 : 0 };
+}
+
+/** 累计计数, 只在有变化时写 (平时 0 次 D1 写) */
+async function bumpCounters(env: Env, delta: Record<string, number>): Promise<void> {
+  const stmts = Object.entries(delta)
+    .filter(([, n]) => n > 0)
+    .map(([name, n]) => env.DB.prepare('INSERT INTO counters (name, n) VALUES (?, ?) ON CONFLICT(name) DO UPDATE SET n = n + excluded.n').bind(name, n));
+  if (stmts.length) await env.DB.batch(stmts);
 }

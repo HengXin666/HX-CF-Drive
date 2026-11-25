@@ -5,7 +5,7 @@ import {
   children, claimName, copy, getNode, HttpError, insert, maintenance, mkdirp, move, pathOf, publicNode, purge, resolvePath, restore, ROOT, trash, trashList,
 } from './tree';
 
-type Scope = 'read' | 'write' | 'admin';
+type Scope = 'read' | 'write' | 'admin' | 'stats';
 interface Ctx { req: Request; url: URL; scopes: Scope[]; body: () => Promise<Record<string, unknown>> }
 type Handler = (c: Ctx, m: RegExpMatchArray) => Promise<Response> | Response;
 
@@ -275,7 +275,7 @@ on('PATCH', '/admin/channels/([^/]+)', 'admin', async (c, m) => {
 
 on('POST', '/admin/tokens', 'admin', async (c) => {
   const b = await c.body();
-  const scopes = (Array.isArray(b.scopes) ? b.scopes : ['read']).filter((s) => ['read', 'write', 'admin'].includes(String(s))).map(String);
+  const scopes = (Array.isArray(b.scopes) ? b.scopes : ['read']).filter((s) => ['read', 'write', 'admin', 'stats'].includes(String(s))).map(String);
   const root = str(b.rootPath) ? mkdirp(String(b.rootPath)) : getNode(ROOT)!;
   const token = `hxd_${newId(32)}`;
   const id = newId();

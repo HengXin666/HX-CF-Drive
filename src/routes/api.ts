@@ -284,14 +284,24 @@ api.delete('/shares/:id', requireScope('write'), async (c) => {
 
 // ---------------- 管理 ----------------
 
-api.get('/admin/stats', requireScope('admin'), async (c) => {
-  const [nodes, blobs, bots, channels] = await c.env.DB.batch([
+/** 用量与健康。`stats` scope 只读这一个接口, 给别的服务 (如 AIOA 额度页) 用, 不必发管理员令牌 */
+api.get('/admin/stats', requireScope('stats'), async (c) => {
+  const [nodes, blobs, bots, channels, counters] = await c.env.DB.batch([
     c.env.DB.prepare('SELECT kind, COUNT(*) AS n FROM nodes WHERE deleted_at IS NULL GROUP BY kind'),
     c.env.DB.prepare('SELECT COUNT(*) AS n, COALESCE(SUM(size),0) AS bytes FROM blobs'),
     c.env.DB.prepare('SELECT id, username, status, last_error FROM bots'),
     c.env.DB.prepare('SELECT * FROM channels'),
+    c.env.DB.prepare('SELECT name, n FROM counters'),
   ]);
-  return c.json({ nodes: nodes.results, blobs: blobs.results[0], bots: bots.results, channels: channels.results });
+  const isAdmin = c.get('principal').scopes.has('admin');
+  return c.json({
+    nodes: nodes.results,
+    blobs: blobs.results[0],
+    // Bot 的报错和频道细节只给管理员
+    bots: isAdmin ? bots.results : (bots.results as { status: string }[]).map((b) => ({ status: b.status })),
+    channels: isAdmin ? channels.results : channels.results.length,
+    counters: Object.fromEntries((counters.results as { name: string; n: number }[]).map((r) => [r.name, r.n])),
+  });
 });
 
 api.post('/admin/bots', requireScope('admin'), async (c) => {
@@ -350,7 +360,7 @@ async function adminStatus(token: string, chatId: string, botId: number): Promis
 
 api.post('/admin/tokens', requireScope('admin'), async (c) => {
   const b = await c.req.json<{ name: string; scopes?: string[]; rootPath?: string; expiresIn?: number }>();
-  const scopes = (b.scopes ?? ['read']).filter((s) => ['read', 'write', 'admin'].includes(s));
+  const scopes = (b.scopes ?? ['read']).filter((s) => ['read', 'write', 'admin', 'stats'].includes(s));
   const root = b.rootPath ? await mkdirp(c.env, 'root', b.rootPath): await getNode(c.env, 'root');
   const plain = `hxd_${newId(32)}`;
   const id = newId();

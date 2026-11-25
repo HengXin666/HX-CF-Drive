@@ -120,7 +120,7 @@ export function Admin({ onChange }: { onChange: () => void }) {
             title: '新建令牌',
             fields: [
               { key: 'name', label: '名称', placeholder: 'picgo' },
-              { key: 'scopes', label: '权限 (逗号分隔: read, write, admin)', value: 'read,write' },
+              { key: 'scopes', label: '权限 (逗号分隔: read, write, admin, stats)', value: 'read,write' },
               { key: 'root', label: '限定根目录', value: '/' },
             ],
             onOk: async (v) => {

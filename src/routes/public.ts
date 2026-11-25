@@ -31,15 +31,32 @@ pub.on(['GET', 'HEAD'], ['/f/:id', '/f/:id/:name'], async (c) => {
   });
 });
 
+const SHARE_MAX_FAILS = 10;
+const SHARE_LOCK_MS = 15 * 60_000;
+
 // 分享: 文件直接下载; 目录返回 JSON 列表, ?path= 访问子项
 pub.on(['GET', 'HEAD'], '/s/:id', async (c) => {
   const share = await c.env.DB.prepare('SELECT * FROM shares WHERE id = ?')
     .bind(c.req.param('id'))
-    .first<{ id: string; node_id: string; password_hash: string | null; expires_at: number | null }>();
+    .first<{ id: string; node_id: string; password_hash: string | null; expires_at: number | null; fails: number; locked_until: number | null }>();
   if (!share || (share.expires_at && share.expires_at < Date.now())) throw new HttpError(404, 'share not found or expired');
   if (share.password_hash) {
-    const pw = c.req.query('p') ?? c.req.header('X-Share-Password') ?? '';
-    if ((await sha256Hex(`${share.id}:${pw}`)) !== share.password_hash) throw new HttpError(401, 'password required');
+    const t = Date.now();
+    if (share.locked_until && share.locked_until > t) {
+      c.header('Retry-After', String(Math.ceil((share.locked_until - t) / 1000)));
+      throw new HttpError(429, 'too many wrong passwords, try later');
+    }
+    const pw = c.req.header('X-Share-Password') ?? c.req.query('p') ?? '';
+    if ((await sha256Hex(`${share.id}:${pw}`)) !== share.password_hash) {
+      // 没带密码 (第一次打开) 不计数; 带错了才计数, 满 SHARE_MAX_FAILS 次锁 SHARE_LOCK_MS, 状态在 D1 里, 多 isolate 也绕不过
+      if (pw) {
+        const lock = share.fails + 1 >= SHARE_MAX_FAILS;
+        await c.env.DB.prepare('UPDATE shares SET fails = ?, locked_until = ? WHERE id = ?')
+          .bind(lock ? 0 : share.fails + 1, lock ? t + SHARE_LOCK_MS : share.locked_until, share.id).run();
+      }
+      throw new HttpError(401, 'password required');
+    }
+    if (share.fails) await c.env.DB.prepare('UPDATE shares SET fails = 0 WHERE id = ?').bind(share.id).run();
   }
   const root = await getNode(c.env, share.node_id);
   if (!root) throw new HttpError(404, 'shared item removed');

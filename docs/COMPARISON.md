@@ -41,7 +41,7 @@
 
 ## 4. 结论
 
-- 需求和 CloudFlare-ImgBed 高度重合: 全 CF, D1 元数据, TG Bot 分片, R2, WebDAV, API。它更成熟, 界面完整, MIT 许可。
-- 建议: **直接部署 CloudFlare-ImgBed 作为主力**, 按需在前面加 OpenList 做统一挂载。HX-CF-Drive 作为备选和参考实现保留。
-- HX-CF-Drive 里值得保留的设计 (全局限速, 秒传, Bot 重新绑定, 令牌目录隔离), 先确认 ImgBed 是否已有, 没有的再以 PR 形式贡献上游, 而不是长期维护一个平行项目。
-- 表中 "未核实" 是我没有在 ImgBed 文档里找到对应说明, 不代表它没有, 部署前请以其文档为准: https://cfbed.sanyue.de/guide/features.html
+- 面向人用的图床 / 网盘, CloudFlare-ImgBed 更成熟, 界面更全, 渠道更多。
+- 给别的服务当存储后端 (Service Binding 调用, 按目录隔离的令牌, 引用计数, 立即彻底删除, 令牌吊销即作废它签的直链), 这些是 HX-CF-Drive 的定位, ImgBed 文档里没有对应说明。HX-AIOA 的大文件渠道按这个定位接入 (HX-AIOA #88)。
+- 要单文件 GB 级, 高吞吐, 或任意时间都能删除 TG 消息, 只能用 Teldrive 这类 MTProto 方案, 代价是常驻服务器和真人账号的封号风险。
+- 表中 "未核实" 是没有在对方文档里找到说明, 不代表没有, 选型前以其文档为准: https://cfbed.sanyue.de/guide/features.html

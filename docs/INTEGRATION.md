@@ -13,7 +13,7 @@ curl -X POST -H "Authorization: Bearer $ADMIN" -H "Content-Type: application/jso
 # 返回 {"token":"hxd_...", ...}, 只显示这一次
 ```
 
-- `scopes`: `read`, `write`, `admin` 的组合。
+- `scopes`: `read`, `write`, `admin`, `stats` 的组合。`stats` 只能读 `/api/v1/admin/stats`, 适合给监控或调用方的额度页。
 - `rootPath`: 令牌只能看到这个目录及其子目录, 路径都相对它。
 - 令牌签的直链 (`/f/...&t=<令牌id>`) 和建的分享跟随令牌: 吊销令牌即全部失效 (直链最多 60 秒内)。管理员签的直链只能靠删除文件或更换 `SIGNING_KEY` 作废。
 - 秒传按令牌隔离, 服务端不重算 sha256: 如果你的服务把终端用户声明的哈希原样转发过来, 用户就能在你的令牌空间里投毒, 请只转发自己算过的哈希。
@@ -43,7 +43,7 @@ curl -X POST -H "Authorization: Bearer $ADMIN" -H "Content-Type: application/jso
 | POST | `/api/v1/uploads/commit` `{ticket, receipts, folds}` | 分片上传: 提交回执和聚合回执 |
 | POST/GET/DELETE | `/api/v1/shares` | 分享链接 |
 | GET | `/f/:id/:name?e=&s=` | 签名直链 (公开) |
-| GET | `/s/:id?p=密码&path=子路径` | 分享 (公开) |
+| GET | `/s/:id?path=子路径` | 分享 (公开); 有密码时用 `X-Share-Password` 头 (也接受 `?p=`, 但会进日志和历史), 连错 10 次锁 15 分钟 |
 | * | `/api/v1/admin/*` | 管理: stats, bots, channels, tokens, maintenance |
 
 错误统一返回 `{"error": "..."}`; 服务端内部错误只返回 `{"error":"internal error","requestId":"..."}`。429 和 503 带 `Retry-After` 头, 客户端按它等待后重试。

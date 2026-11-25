@@ -167,14 +167,26 @@ async function tgStream(env: Env, blob: BlobInfo, r: ByteRange, waitUntil?: (p: 
   const bots = await allBots(env);
   const FLS = (globalThis as { FixedLengthStream?: new (n: number) => TransformStream<Uint8Array, Uint8Array> }).FixedLengthStream;
   const { readable, writable } = FLS ? new FLS(r.end - r.start + 1) : new TransformStream<Uint8Array, Uint8Array>();
+  // 预取下一片: 当前片在往外送时, 下一片的 getFile 与连接已经建好, 片与片之间不再串行等一个 TG 往返。
+  // 同时最多 2 个 TG 连接 (Workers 允许 6 个), 子请求总数不变
+  const open = (i: number) => {
+    const sl = slices[i];
+    const p = openChunk(env, bots, blob, sl.idx, sl.from, sl.to);
+    p.catch(() => {}); // 失败在轮到它时再抛, 避免未处理的拒绝
+    return p;
+  };
   const pump = (async () => {
+    let next = slices.length ? open(0) : null;
     try {
-      for (const sl of slices) {
-        const src = await openChunk(env, bots, blob, sl.idx, sl.from, sl.to);
+      for (let i = 0; i < slices.length; i++) {
+        const src = await next!;
+        next = i + 1 < slices.length ? open(i + 1) : null;
         await src.pipeTo(writable, { preventClose: true });
       }
       await writable.close();
     } catch (e) {
+      // 客户端断开或某片失败: 取消已经打开的下一片, 不白白下载
+      if (next) next.then((s) => s.cancel()).catch(() => {});
       await writable.abort(e).catch(() => {});
     }
   })();

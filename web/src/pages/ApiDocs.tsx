@@ -12,7 +12,7 @@ const METHOD_TONE: Record<Method, string> = {
   PATCH: 'bg-violet-400/15 text-violet-300',
   DELETE: 'bg-rose-400/15 text-rose-300',
 };
-const SCOPE_TONE = { read: 'secondary', write: 'default', admin: 'warning', public: 'success' } as const;
+const SCOPE_TONE = { read: 'secondary', write: 'default', admin: 'warning', stats: 'secondary', public: 'success' } as const;
 
 function copy(text: string) {
   void navigator.clipboard.writeText(text).then(() => toast.success('已复制'));

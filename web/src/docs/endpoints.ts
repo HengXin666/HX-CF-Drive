@@ -3,7 +3,7 @@ export type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 export interface Endpoint {
   method: Method;
   path: string;
-  scope: 'read' | 'write' | 'admin' | 'public';
+  scope: 'read' | 'write' | 'admin' | 'stats' | 'public';
   desc: string;
   body?: string;
   resp?: string;
@@ -63,7 +63,7 @@ export const GROUPS: Group[] = [
   {
     id: 'admin', title: '管理',
     items: [
-      { method: 'GET', path: '/api/v1/admin/stats', scope: 'admin', desc: '用量, Bot 与频道状态' },
+      { method: 'GET', path: '/api/v1/admin/stats', scope: 'stats', desc: '用量, Bot 与频道状态, 累计计数 (stats scope 只读这一项, 不含 Bot 报错)' },
       { method: 'POST', path: '/api/v1/admin/channels', scope: 'admin', desc: '添加存储频道, 返回每个 Bot 是否为管理员', body: '{"id":"-1001234567890"}' },
       { method: 'PATCH', path: '/api/v1/admin/channels/<id>', scope: 'admin', desc: '频道设为只读或恢复', body: '{"status":"readonly"}' },
       { method: 'POST', path: '/api/v1/admin/bots', scope: 'admin', desc: '添加 Bot', body: '{"token":"123456:ABC..."}' },

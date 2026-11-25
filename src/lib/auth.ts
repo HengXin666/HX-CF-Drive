@@ -37,7 +37,7 @@ export async function resolvePrincipal(env: Env, token: string | null): Promise<
 }
 
 /** 中间件: 要求某个权限 */
-export function requireScope(scope: 'read' | 'write' | 'admin') {
+export function requireScope(scope: 'read' | 'write' | 'admin' | 'stats') {
   return async (c: Context<AppEnv>, next: Next) => {
     let p = c.get('principal');
     if (!p) {

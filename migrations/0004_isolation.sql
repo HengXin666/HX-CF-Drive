@@ -6,3 +6,8 @@ UPDATE blobs SET owner = 'admin' WHERE sha256 IS NOT NULL;
 DROP INDEX idx_blobs_sha;
 CREATE UNIQUE INDEX idx_blobs_sha ON blobs(sha256, owner) WHERE sha256 IS NOT NULL;
 ALTER TABLE shares ADD COLUMN token_id TEXT;
+-- 3. 分享密码防爆破: 连续 10 次错误锁 15 分钟
+ALTER TABLE shares ADD COLUMN fails INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE shares ADD COLUMN locked_until INTEGER;
+-- 4. 累计计数 (tg_expired: 超过 48 小时删不掉而留在频道里的消息数, tg_failed: 删除失败数), 给 stats 看
+CREATE TABLE counters (name TEXT PRIMARY KEY, n INTEGER NOT NULL DEFAULT 0) WITHOUT ROWID;

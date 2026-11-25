@@ -78,4 +78,19 @@ await j('POST', '/api/v1/fs/restore', { id: af.data.node.id }, H(aioa));
 ok((await j('GET', '/api/v1/fs/stat?path=/mine.txt', null, H(aioa))).s === 200, '受限令牌能恢复');
 const se = await j('GET', '/api/v1/fs/search?q=mine', null, H(aioa));
 ok(se.b.items?.some((n) => n.name === 'mine.txt'), '受限令牌在自己子树里搜得到');
+// 分享密码防爆破
+const pf = await raw(A, `/pw-${RUN}`, 'p.txt', 'pw-content', 'text/plain');
+const psh = await j('POST', '/api/v1/shares', { id: pf.data.node.id, password: 'right' });
+ok((await fetch(`${BASE}/s/${psh.b.id}`)).status === 401, '不带密码 401 (不计数)');
+let st = 0;
+for (let i = 0; i < 10; i++) st = (await fetch(`${BASE}/s/${psh.b.id}`, { headers: { 'X-Share-Password': `w${i}` } })).status;
+ok(st === 401, '前 10 次错密码 401');
+const locked = await fetch(`${BASE}/s/${psh.b.id}`, { headers: { 'X-Share-Password': 'right' } });
+ok(locked.status === 429 && Number(locked.headers.get('retry-after')) > 0, '连错 10 次后锁定, 正确密码也 429');
+// stats scope
+const st1 = await mk('stats', ['stats'], '/');
+const sr2 = await j('GET', '/api/v1/admin/stats', null, H(st1));
+ok(sr2.s === 200 && typeof sr2.b.channels === 'number' && sr2.b.counters && !sr2.b.bots.some((b) => 'last_error' in b), 'stats 令牌能读用量, 看不到 Bot 报错与频道细节');
+ok((await j('GET', '/api/v1/admin/tokens', null, H(st1))).s === 403, 'stats 令牌进不了其他管理接口');
+ok((await j('GET', '/api/v1/fs/list?path=/', null, H(st1))).s === 403, 'stats 令牌读不了文件');
 console.log(`全部通过: ${pass} 项`);
