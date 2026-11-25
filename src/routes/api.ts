@@ -3,7 +3,7 @@ import { Hono, type Context } from 'hono';
 import type { AppEnv, Env } from '../env';
 import { num, publicOrigin } from '../env';
 import { activeChannels, allBots, invalidateBotCache, invalidateChannelCache, tgCall } from '../drivers/tg';
-import { requireScope } from '../lib/auth';
+import { forgetToken, requireScope } from '../lib/auth';
 import { signLink } from '../lib/sign';
 import {
   assertAccess, getNode, getNodeCached, listChildren, mkdirp, moveNode, type NodeRow, pathFor, pathsOf, publicNode, resolvePath, trashNode,
@@ -34,10 +34,13 @@ async function locate(c: C, id?: string | null, path?: string | null): Promise<N
   return node;
 }
 
-export async function fileLink(env: Env, origin: string, node: NodeRow, expiresInSec = 0): Promise<string> {
+export async function fileLink(env: Env, origin: string, node: NodeRow, expiresInSec = 0, tid = 'admin'): Promise<string> {
   const exp = expiresInSec > 0 ? Math.floor(Date.now() / 1000) + expiresInSec : 0;
-  return `${origin}/f/${node.id}/${encodeURIComponent(node.name)}?${await signLink(env.SIGNING_KEY, node.id, exp)}`;
+  return `${origin}/f/${node.id}/${encodeURIComponent(node.name)}?${await signLink(env.SIGNING_KEY, node.id, exp, tid)}`;
 }
+
+/** 当前令牌签的直链 */
+const linkFor = (c: C, node: NodeRow, expiresInSec = 0) => fileLink(c.env, publicOrigin(c.env, c.req.url), node, expiresInSec, c.get('principal').id);
 
 // ---------------- 目录 ----------------
 
@@ -123,9 +126,14 @@ api.get('/fs/search', requireScope('read'), async (c) => {
   if (q.length < 1) throw new HttpError(400, 'q required');
   const limit = Math.min(num(c.req.query('limit'), 50), 200);
   const like = `%${q.replace(/[%_\\]/g, (m) => '\\' + m)}%`;
-  const r = await c.env.DB.prepare("SELECT * FROM nodes WHERE deleted_at IS NULL AND name LIKE ? ESCAPE '\\' LIMIT ?")
-    .bind(like, c.get('principal').rootId === 'root' ? limit : limit * 2)
-    .all<NodeRow>();
+  // 受限令牌只在自己的子树里搜: 先全表 LIMIT 再过滤会被别人的文件挤掉, 一条结果都拿不到
+  const r = c.get('principal').rootId === 'root'
+    ? await c.env.DB.prepare("SELECT * FROM nodes WHERE deleted_at IS NULL AND name LIKE ? ESCAPE '\\' LIMIT ?").bind(like, limit).all<NodeRow>()
+    : await c.env.DB.prepare(
+      `WITH RECURSIVE sub(id) AS (
+         SELECT ?1 UNION ALL SELECT n.id FROM nodes n JOIN sub ON n.parent_id = sub.id WHERE n.deleted_at IS NULL AND n.kind = 'dir' LIMIT 20000
+       ) SELECT n.* FROM nodes n JOIN sub ON n.parent_id = sub.id WHERE n.deleted_at IS NULL AND n.name LIKE ?2 ESCAPE '\\' LIMIT ?3`,
+    ).bind(c.get('principal').rootId, like, limit).all<NodeRow>();
   // 路径和权限一次批量查完, 不再每条结果查一次
   const p = c.get('principal');
   const paths = await pathsOf(c.env, r.results);
@@ -143,7 +151,7 @@ api.post('/fs/link', requireScope('read'), async (c) => {
   const b = await c.req.json<{ id?: string; path?: string; expiresIn?: number }>();
   const node = await locate(c, b.id, b.path);
   if (node.kind !== 'file') throw new HttpError(400, 'not a file');
-  return c.json({ url: await fileLink(c.env, publicOrigin(c.env, c.req.url), node, b.expiresIn ?? 0) });
+  return c.json({ url: await linkFor(c, node, b.expiresIn ?? 0) });
 });
 
 // ---------------- 读取内容 ----------------
@@ -166,7 +174,7 @@ api.post('/uploads', requireScope('write'), async (c) => {
   else if (b.mkdirs !== false) parent = await mkdirp(c.env, p.rootId, b.path ?? '/');
   else parent = await locate(c, null, b.path ?? '/');
   const r = await initUpload(c.env, p, { parentId: parent.id, parent, name: b.name, size: b.size, mime: b.mime, sha256: b.sha256, overwrite: b.overwrite });
-  if (r.done) return c.json({ done: true, node: publicNode(r.node), url: await fileLink(c.env, publicOrigin(c.env, c.req.url), r.node) });
+  if (r.done) return c.json({ done: true, node: publicNode(r.node), url: await linkFor(c, r.node) });
   return c.json(r);
 });
 
@@ -194,7 +202,7 @@ api.post('/uploads/commit', requireScope('write'), async (c) => {
   const b = await c.req.json<{ ticket: string; receipts?: string[]; folds?: string[] }>();
   const t = await openTicket(c.env, c.get('principal'), b.ticket);
   const node = await commitUpload(c.env, t, b.receipts ?? [], b.folds ?? []);
-  return c.json({ node: publicNode(node), url: await fileLink(c.env, publicOrigin(c.env, c.req.url), node) });
+  return c.json({ node: publicNode(node), url: await linkFor(c, node) });
 });
 
 /**
@@ -204,7 +212,6 @@ api.post('/uploads/commit', requireScope('write'), async (c) => {
  */
 api.post('/upload', requireScope('write'), async (c) => {
   const p = c.get('principal');
-  const origin = publicOrigin(c.env, c.req.url);
   const path = c.req.query('path') ?? '/';
   const ct = c.req.header('Content-Type') ?? '';
   const overwrite = c.req.query('overwrite') === '1';
@@ -217,14 +224,14 @@ api.post('/upload', requireScope('write'), async (c) => {
       const f = v as File;
       const name = c.req.query('rename') === '1' ? renameRandom(f.name): f.name;
       const node = await uploadStream(c.env, p, { parentId: parent.id, parent, name, size: f.size, mime: f.type || undefined, overwrite }, f.stream());
-      results.push({ node: publicNode(node), url: await fileLink(c.env, origin, node) });
+      results.push({ node: publicNode(node), url: await linkFor(c, node) });
     }
   } else {
     const name = c.req.query('name');
     const len = Number(c.req.header('Content-Length'));
     if (!name || !Number.isFinite(len)) throw new HttpError(400, 'raw upload needs ?name= and Content-Length');
     const node = await uploadStream(c.env, p, { parentId: parent.id, parent, name, size: len, mime: ct || undefined, overwrite }, c.req.raw.body ?? new ReadableStream({ start: (ctl) => ctl.close() }));
-    results.push({ node: publicNode(node), url: await fileLink(c.env, origin, node) });
+    results.push({ node: publicNode(node), url: await linkFor(c, node) });
   }
   if (results.length === 0) throw new HttpError(400, 'no file');
   // 兼容 PicGo 自定义 Web 图床插件: 取 data.url / url
@@ -243,20 +250,34 @@ api.post('/shares', requireScope('read'), async (c) => {
   const b = await c.req.json<{ id?: string; path?: string; password?: string; expiresIn?: number }>();
   const node = await locate(c, b.id, b.path);
   const id = newId(10);
-  await c.env.DB.prepare('INSERT INTO shares (id, node_id, password_hash, expires_at, created_at) VALUES (?, ?, ?, ?, ?)')
-    .bind(id, node.id, b.password ? await sha256Hex(`${id}:${b.password}`): null, b.expiresIn ? now() + b.expiresIn * 1000 : null, now())
+  await c.env.DB.prepare('INSERT INTO shares (id, node_id, password_hash, expires_at, created_at, token_id) VALUES (?, ?, ?, ?, ?, ?)')
+    .bind(id, node.id, b.password ? await sha256Hex(`${id}:${b.password}`): null, b.expiresIn ? now() + b.expiresIn * 1000 : null, now(), c.get('principal').id)
     .run();
   return c.json({ id, url: `${publicOrigin(c.env, c.req.url)}/s/${id}` });
 });
 
+/** 分享列表按令牌范围隔离: 受限令牌只看得到自己根目录下的分享 (分享 id 就是公开访问凭证, 不能泄露给别的令牌) */
 api.get('/shares', requireScope('read'), async (c) => {
+  const p = c.get('principal');
+  if (p.rootId === 'root') {
+    const r = await c.env.DB.prepare(
+      'SELECT s.id, s.node_id, s.expires_at, s.created_at, n.name, (s.password_hash IS NOT NULL) AS has_password FROM shares s JOIN nodes n ON n.id = s.node_id ORDER BY s.created_at DESC LIMIT 200',
+    ).all();
+    return c.json({ items: r.results });
+  }
   const r = await c.env.DB.prepare(
-    'SELECT s.id, s.node_id, s.expires_at, s.created_at, n.name, (s.password_hash IS NOT NULL) AS has_password FROM shares s JOIN nodes n ON n.id = s.node_id ORDER BY s.created_at DESC LIMIT 200',
-).all();
+    `WITH RECURSIVE sub(id) AS (
+       SELECT ?1 UNION ALL SELECT n.id FROM nodes n JOIN sub ON n.parent_id = sub.id WHERE n.deleted_at IS NULL LIMIT 20000
+     ) SELECT s.id, s.node_id, s.expires_at, s.created_at, n.name, (s.password_hash IS NOT NULL) AS has_password
+       FROM shares s JOIN sub ON sub.id = s.node_id JOIN nodes n ON n.id = s.node_id ORDER BY s.created_at DESC LIMIT 200`,
+  ).bind(p.rootId).all();
   return c.json({ items: r.results });
 });
 
 api.delete('/shares/:id', requireScope('write'), async (c) => {
+  const s = await c.env.DB.prepare('SELECT node_id FROM shares WHERE id = ?').bind(c.req.param('id')).first<{ node_id: string }>();
+  if (!s) throw new HttpError(404, 'share not found');
+  await assertAccess(c.env, c.get('principal'), s.node_id);
   await c.env.DB.prepare('DELETE FROM shares WHERE id = ?').bind(c.req.param('id')).run();
   return c.json({ ok: true });
 });
@@ -344,8 +365,14 @@ api.get('/admin/tokens', requireScope('admin'), async (c) => {
   return c.json({ items: r.results });
 });
 
+/** 吊销令牌: 它签的直链随之失效 (见 tokenAlive), 它建的分享一并删除 */
 api.delete('/admin/tokens/:id', requireScope('admin'), async (c) => {
-  await c.env.DB.prepare('DELETE FROM tokens WHERE id = ?').bind(c.req.param('id')).run();
+  const id = c.req.param('id')!;
+  await c.env.DB.batch([
+    c.env.DB.prepare('DELETE FROM tokens WHERE id = ?').bind(id),
+    c.env.DB.prepare('DELETE FROM shares WHERE token_id = ?').bind(id),
+  ]);
+  forgetToken(id);
   return c.json({ ok: true });
 });
 

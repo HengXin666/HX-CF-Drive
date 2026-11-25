@@ -15,6 +15,8 @@ curl -X POST -H "Authorization: Bearer $ADMIN" -H "Content-Type: application/jso
 
 - `scopes`: `read`, `write`, `admin` 的组合。
 - `rootPath`: 令牌只能看到这个目录及其子目录, 路径都相对它。
+- 令牌签的直链 (`/f/...&t=<令牌id>`) 和建的分享跟随令牌: 吊销令牌即全部失效 (直链最多 60 秒内)。管理员签的直链只能靠删除文件或更换 `SIGNING_KEY` 作废。
+- 秒传按令牌隔离, 服务端不重算 sha256: 如果你的服务把终端用户声明的哈希原样转发过来, 用户就能在你的令牌空间里投毒, 请只转发自己算过的哈希。
 - 传递方式: `Authorization: Bearer <token>`, WebDAV 用 Basic (用户名随意, 密码填令牌)。不支持 `?token=` (会进浏览器历史, 代理日志和 Referer); 需要免令牌访问时用签名直链 `/f/` 或分享链接 `/s/`。
 
 ## 2. REST API
@@ -66,7 +68,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
   -d "{\"ticket\":\"$TICKET\",\"receipts\":[\"...\",\"...\",\"...\"]}" $BASE/api/v1/uploads/commit
 ```
 
-秒传规则: 管理员和根目录为 `/` 的令牌, 库里有同 sha256 同大小的文件就秒传; 受限令牌只有当这个文件已经在它自己的根目录里时才秒传, 否则照常上传 (它上传的文件也不登记哈希, 防止投毒)。
+秒传规则 (v0.3.1): 哈希按上传者登记 (`blobs.owner`)。每个令牌只能秒传自己登记过的文件, 或管理员登记的文件; 受限令牌秒传管理员的文件时还要求该文件已在它自己的根目录里。别的令牌伪造哈希最多污染它自己的空间。
 
 #### 断点续传
 
@@ -174,7 +176,7 @@ async function upload(file, path = '/') {
 <video controls src="https://drive.example.com/f/<id>/v.mp4?e=0&s=..."></video>
 ```
 
-`/f/*` 已开启 CORS, 可以跨域加载。
+`/f/*` 已开启 CORS, 可以跨域加载。所有文件内容都带 `Content-Security-Policy: sandbox`: 图片, 音视频照常内联显示, html / svg 打开后脚本不执行 (PDF 例外, 不带 sandbox 以便浏览器内置查看器打开)。
 
 大文件 (冷读超过约 456 MB) 单次响应会被 206 截断, 浏览器直接点链接下载会只拿到第一段。网页端会自动按 Content-Range 续拉 (`web/src/lib/transfer.ts` 的 `download`), 或用支持断点续传的下载器 (aria2, IDM)。播放器本身就按 Range 请求, 不受影响。
 

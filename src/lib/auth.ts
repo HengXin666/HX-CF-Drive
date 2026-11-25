@@ -53,3 +53,19 @@ export function requireScope(scope: 'read' | 'write' | 'admin') {
     await next();
   };
 }
+
+/** 令牌是否仍然有效 (直链校验用)。isolate 内缓存 60 秒, 吊销后最多 60 秒内失效 */
+const aliveCache = new Map<string, { at: number; ok: boolean }>();
+export async function tokenAlive(env: Env, tid: string): Promise<boolean> {
+  if (tid === 'admin') return true;
+  const hit = aliveCache.get(tid);
+  if (hit && now() - hit.at < 60_000) return hit.ok;
+  const row = await env.DB.prepare('SELECT expires_at FROM tokens WHERE id = ?').bind(tid).first<{ expires_at: number | null }>();
+  const ok = !!row && !(row.expires_at && row.expires_at < now());
+  if (aliveCache.size > 1000) aliveCache.clear();
+  aliveCache.set(tid, { at: now(), ok });
+  return ok;
+}
+export function forgetToken(tid: string): void {
+  aliveCache.delete(tid);
+}

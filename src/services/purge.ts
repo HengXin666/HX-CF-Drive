@@ -10,7 +10,19 @@ import { now } from '../lib/util';
 import { forgetBlob, parseManifest } from './serve';
 import type { ChunkRef } from './upload';
 
-export interface PurgeStats { nodes: number; blobs: number; tgDeletes: number; tgCalls: number }
+export interface PurgeStats { nodes: number; blobs: number; tgDeletes: number; tgCalls: number; tgExpired: number; tgFailed: number }
+
+/**
+ * TG 只允许 Bot 删除 48 小时内的消息, 而 deleteMessages 一批里只要混进一条删不掉的, 整批都会失败。
+ * blob 的 created_at 是 commit 时间, 分片最早可能在它之前 24 小时 (上传凭证有效期) 发出:
+ * - commit 不到 23 小时: 分片一定还能删, 放进 "确定能删" 的批次
+ * - 23 到 47 小时: 可能能删, 单独成批, 失败了不连累前一类
+ * - 超过 47 小时: 一定删不掉, 不再浪费子请求, 只删 D1 记录并计入 tgExpired (字节留在频道, 不占 CF 额度)
+ */
+const SURE_MS = 23 * 3600_000;
+const MAYBE_MS = 47 * 3600_000;
+type Age = 0 | 1 | 2;
+const ageOf = (createdAt: number, t: number): Age => (t - createdAt < SURE_MS ? 0 : t - createdAt < MAYBE_MS ? 1 : 2);
 
 /** 回收站超期的截止时间。deleted_at = 1 表示 "彻底删除", 一定早于它 */
 export function trashCutoff(env: Env): number {
@@ -48,7 +60,7 @@ function deleter(bots: BotRow[]): BotRow | undefined {
 }
 
 /** 一个清理单元: 整行清单 (part = null) 或分段清单的一段 */
-interface Unit { blob: string; part: number | null; refs: ChunkRef[] }
+interface Unit { blob: string; part: number | null; refs: ChunkRef[]; age: Age }
 
 /**
  * 清理引用归零的 blob。tgBudget 是本次可用的 TG 子请求数。
@@ -60,30 +72,35 @@ export async function purgeBlobs(env: Env, tgBudget: number, out: PurgeStats): P
   const bot = deleter(await allBots(env));
   if (!bot) return;
   for (let round = 0; round < 4 && tgBudget > 0; round++) {
-    const rows = (await env.DB.prepare('SELECT id, manifest FROM blobs WHERE ref_count <= 0 LIMIT 100').all<{ id: string; manifest: string }>()).results;
+    const rows = (await env.DB.prepare('SELECT id, manifest, created_at FROM blobs WHERE ref_count <= 0 LIMIT 100').all<{ id: string; manifest: string; created_at: number }>()).results;
+    const t = now();
+    const ageById = new Map(rows.map((r) => [r.id, ageOf(r.created_at, t)]));
     if (!rows.length) return;
     const units: Unit[] = [];
     const parted: string[] = [];
     for (const row of rows) {
       const m = parseManifest(row.manifest);
       if (m.parts) parted.push(row.id);
-      else units.push({ blob: row.id, part: null, refs: m.refs });
+      else units.push({ blob: row.id, part: null, refs: m.refs, age: ageById.get(row.id)! });
     }
     if (parted.length) {
       const segs = (await env.DB.prepare('SELECT blob_id, idx, refs FROM blob_parts WHERE blob_id IN (SELECT value FROM json_each(?)) ORDER BY blob_id, idx LIMIT 200')
         .bind(JSON.stringify(parted)).all<{ blob_id: string; idx: number; refs: string }>()).results;
-      for (const sg of segs) units.push({ blob: sg.blob_id, part: sg.idx, refs: JSON.parse(sg.refs) as ChunkRef[] });
+      for (const sg of segs) units.push({ blob: sg.blob_id, part: sg.idx, refs: JSON.parse(sg.refs) as ChunkRef[], age: ageById.get(sg.blob_id)! });
     }
 
     const perChan = new Map<string, number[]>();
     const calls = () => [...perChan.values()].reduce((a, l) => a + Math.ceil(l.length / DELETE_BATCH), 0);
     const whole: Unit[] = [];
     let partial: { u: Unit; left: ChunkRef[] } | null = null;
+    // 键是 "年龄类别|频道", 不同类别不混在一批里
     for (const u of units) {
+      if (u.age === 2) { whole.push(u); out.tgExpired += u.refs.length; continue; }
       const snapshot = new Map([...perChan].map(([k, v]) => [k, v.length]));
       for (const r of u.refs) {
-        let l = perChan.get(r.c);
-        if (!l) perChan.set(r.c, (l = []));
+        const key = `${u.age}|${r.c}`;
+        let l = perChan.get(key);
+        if (!l) perChan.set(key, (l = []));
         l.push(r.m);
       }
       if (calls() <= tgBudget) { whole.push(u); continue; }
@@ -94,8 +111,9 @@ export async function purgeBlobs(env: Env, tgBudget: number, out: PurgeStats): P
         let k = 0;
         for (; k < u.refs.length; k++) {
           const r = u.refs[k];
-          let l = perChan.get(r.c);
-          if (!l) perChan.set(r.c, (l = []));
+          const key = `${u.age}|${r.c}`;
+          let l = perChan.get(key);
+          if (!l) perChan.set(key, (l = []));
           l.push(r.m);
           if (calls() > tgBudget) { l.pop(); break; }
         }
@@ -105,12 +123,14 @@ export async function purgeBlobs(env: Env, tgBudget: number, out: PurgeStats): P
     }
     // 执行删除。限流或令牌失效: 本轮不删任何行, 下次重来 (已删的消息 TG 会跳过)
     try {
-      for (const [chan, ids] of perChan) {
+      for (const [key, ids] of perChan) {
+        const chan = key.slice(key.indexOf('|') + 1);
         for (let i = 0; i < ids.length; i += DELETE_BATCH) {
           const part = ids.slice(i, i + DELETE_BATCH);
           tgBudget--;
           out.tgCalls++;
           if (await deleteMessages(bot, chan, part)) out.tgDeletes += part.length;
+          else out.tgFailed += part.length; // 删不掉 (无权限或已超 48 小时): 计数, 让维护结果看得见留在频道里的量
         }
       }
     } catch (e) {
@@ -155,7 +175,7 @@ export async function backlog(env: Env): Promise<{ leftNodes: number; leftBlobs:
 
 /** 一次完整的硬删除: 节点 + blob + 剩余量 */
 export async function purgeAll(env: Env, tgBudget: number, maxNodes = 400): Promise<PurgeStats & { leftNodes: number; leftBlobs: number; more: number }> {
-  const out: PurgeStats = { nodes: 0, blobs: 0, tgDeletes: 0, tgCalls: 0 };
+  const out: PurgeStats = { nodes: 0, blobs: 0, tgDeletes: 0, tgCalls: 0, tgExpired: 0, tgFailed: 0 };
   out.nodes = await purgeNodes(env, maxNodes);
   await purgeBlobs(env, tgBudget, out);
   const left = await backlog(env);

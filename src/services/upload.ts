@@ -13,7 +13,7 @@ import {
 } from '../drivers/tg';
 import { openJson, sealJson } from '../lib/sign';
 import { assertAccess, childByName, getNode, type NodeRow, trashNode } from '../lib/tree';
-import { guessMime, HttpError, newId, now, validName } from '../lib/util';
+import { cleanMime, HttpError, newId, now, validName } from '../lib/util';
 
 /** 分片清单中的一项 */
 export interface ChunkRef { c: string; m: number; b: string; f: string; s: number }
@@ -73,7 +73,7 @@ export async function initUpload(env: Env, p: Principal, inp: InitInput): Promis
   const existing = await childByName(env, parent.id, inp.name);
   if (existing && (existing.kind === 'dir' || !inp.overwrite)) throw new HttpError(409, 'target exists');
 
-  const mime = inp.mime || guessMime(inp.name);
+  const mime = cleanMime(inp.mime, inp.name);
   const sha = inp.sha256 && /^[0-9a-f]{64}$/i.test(inp.sha256) ? inp.sha256.toLowerCase(): null;
 
   // 秒传: 同哈希同大小的 blob 已存在就直接引用 (走唯一索引, 读 1 行)
@@ -83,13 +83,12 @@ export async function initUpload(env: Env, p: Principal, inp: InitInput): Promis
     return { done: true, node: await linkNode(env, parent.id, inp.name, 0, mime, 'empty', existing) };
   }
 
-  // 受限令牌 (根目录不是 /) 只能秒传自己看得见的 blob, 自己上传的 blob 也不登记哈希, 见 #8
-  const restricted = p.rootId !== 'root';
+  // 秒传按上传者隔离 (哈希由客户端声明, 服务端不重算): 只认自己登记的 blob 和管理员登记的 blob,
+  // 别的令牌声明一个假哈希最多污染它自己的空间, 见 #8 与 v0.3.1 评审
   if (sha) {
-    // ref_count > 0: 引用归零的 blob 可能正在被清理, 不能再挂上
-    const blob = await env.DB.prepare('SELECT id FROM blobs WHERE sha256 = ? AND size = ? AND ref_count > 0').bind(sha, inp.size).first<{ id: string }>();
-    if (blob && (!restricted || (await blobVisible(env, p.rootId, blob.id)))) {
-      const node = await linkNode(env, parent.id, inp.name, inp.size, mime, blob.id, existing);
+    const blob = await findDedup(env, p, sha, inp.size);
+    if (blob) {
+      const node = await linkNode(env, parent.id, inp.name, inp.size, mime, blob, existing);
       return { done: true, node };
     }
   }
@@ -99,10 +98,26 @@ export async function initUpload(env: Env, p: Principal, inp: InitInput): Promis
   const chunkSize = chunkSizeOf(env);
   const blobId = newId(20);
   const t: Ticket = {
-    u: p.id, p: parent.id, n: inp.name, z: inp.size, t: mime, h: restricted ? null : sha, o: inp.overwrite ? 1 : 0,
+    u: p.id, p: parent.id, n: inp.name, z: inp.size, t: mime, h: sha, o: inp.overwrite ? 1 : 0,
     id: blobId, k: chunkSize, c: pickChannel(channels, blobId), x: Math.floor(now() / 1000) + 24 * 3600,
   };
   return { done: false, ticket: await sealJson(env.SIGNING_KEY, TICKET, t), chunkSize, chunkCount: chunkCountOf(inp.size, chunkSize) };
+}
+
+/**
+ * 找可秒传的 blob。ref_count > 0: 引用归零的 blob 可能正在被清理, 不能再挂上。
+ * 自己登记的直接用; 管理员登记的, 受限令牌还要求它在自己根目录下有引用 (否则等于知道哈希就能读别人的文件)。
+ */
+async function findDedup(env: Env, p: Principal, sha: string, size: number): Promise<string | null> {
+  const rows = (await env.DB.prepare(
+    "SELECT id, owner FROM blobs WHERE sha256 = ?1 AND size = ?2 AND ref_count > 0 AND owner IN (?3, 'admin')",
+  ).bind(sha, size, p.id).all<{ id: string; owner: string }>()).results;
+  const own = rows.find((r) => r.owner === p.id);
+  if (own) return own.id;
+  const adm = rows.find((r) => r.owner === 'admin');
+  if (!adm) return null;
+  if (p.rootId === 'root' || (await blobVisible(env, p.rootId, adm.id))) return adm.id;
+  return null;
 }
 
 /** 秒传时可见子树的上限: 超过按不可见处理, 走正常上传 */
@@ -236,13 +251,16 @@ export async function commitUpload(env: Env, t: Ticket, receipts: string[], fold
   const nodeStmt = env.DB.prepare(
     `INSERT INTO nodes (id, parent_id, name, kind, size, mime, blob_id, created_at, updated_at) VALUES (?, ?, ?, 'file', ?, ?, ?, ?, ?)`,
 ).bind(id, t.p, t.n, t.z, t.t, t.id, ts, ts);
-  const blobSql = 'INSERT INTO blobs (id, size, sha256, chunk_size, manifest, ref_count, created_at) VALUES (?, ?, ?, ?, ?, 1, ?)';
+  const blobSql = 'INSERT INTO blobs (id, size, sha256, chunk_size, manifest, ref_count, created_at, owner) VALUES (?, ?, ?, ?, ?, 1, ?, ?)';
+  const owner = t.h ? t.u : null;
   try {
-    await env.DB.batch([env.DB.prepare(blobSql).bind(t.id, t.z, t.h, t.k, manifest, ts), ...partStmts, nodeStmt]);
+    await env.DB.batch([env.DB.prepare(blobSql).bind(t.id, t.z, t.h, t.k, manifest, ts, owner), ...partStmts, nodeStmt]);
   } catch (e) {
-    // 并发上传了同一内容, 撞了哈希唯一索引: 放弃哈希, 照样可用
+    // 同一张凭证提交两次: blob 主键已存在
+    if (/blobs\.id/i.test(String(e))) throw new HttpError(409, 'upload already committed');
+    // 同一上传者并发上传了同一内容, 撞了哈希唯一索引: 放弃哈希, 照样可用
     if (!t.h || !/UNIQUE/i.test(String(e))) throw e;
-    await env.DB.batch([env.DB.prepare(blobSql).bind(t.id, t.z, null, t.k, manifest, ts), ...partStmts, nodeStmt]);
+    await env.DB.batch([env.DB.prepare(blobSql).bind(t.id, t.z, null, t.k, manifest, ts, null), ...partStmts, nodeStmt]);
   }
   return { id, parent_id: t.p, name: t.n, kind: 'file', size: t.z, mime: t.t, blob_id: t.id, created_at: ts, updated_at: ts, deleted_at: null };
 }

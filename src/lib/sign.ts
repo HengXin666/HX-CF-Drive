@@ -17,15 +17,18 @@ async function hmac(key: string, msg: string): Promise<string> {
   return b64url(sig).slice(0, 32);
 }
 
-/** 生成签名直链参数。exp 为 Unix 秒, 0 表示永久 */
-export async function signLink(key: string, nodeId: string, exp: number): Promise<string> {
-  const s = await hmac(key, `${nodeId}.${exp}`);
-  return `e=${exp}&s=${s}`;
+/** 签名内容: 管理员签的直链不带令牌 (与旧链接兼容); 普通令牌签的带上令牌 id, 吊销令牌即作废它签过的所有直链 */
+const linkMsg = (nodeId: string, exp: number, tid: string) => (tid === 'admin' ? `${nodeId}.${exp}` : `${nodeId}.${exp}.${tid}`);
+
+/** 生成签名直链参数。exp 为 Unix 秒, 0 表示永久; tid 是签发令牌的 id */
+export async function signLink(key: string, nodeId: string, exp: number, tid = 'admin'): Promise<string> {
+  const s = await hmac(key, linkMsg(nodeId, exp, tid));
+  return tid === 'admin' ? `e=${exp}&s=${s}` : `e=${exp}&t=${encodeURIComponent(tid)}&s=${s}`;
 }
 
-export async function verifyLink(key: string, nodeId: string, exp: number, sig: string, nowSec = Math.floor(Date.now() / 1000)): Promise<boolean> {
+export async function verifyLink(key: string, nodeId: string, exp: number, sig: string, nowSec = Math.floor(Date.now() / 1000), tid = 'admin'): Promise<boolean> {
   if (exp !== 0 && exp < nowSec) return false;
-  const expect = await hmac(key, `${nodeId}.${exp}`);
+  const expect = await hmac(key, linkMsg(nodeId, exp, tid));
   return safeEqual(expect, sig);
 }
 

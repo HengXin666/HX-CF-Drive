@@ -12,6 +12,13 @@ describe('签名直链', () => {
     expect(await verifyLink('k', 'node2', 0, q.get('s')!)).toBe(false);
     expect(await verifyLink('k2', 'node1', 0, q.get('s')!)).toBe(false);
   });
+  it('普通令牌签的直链绑定令牌 id, 不能冒充管理员链接或别的令牌', async () => {
+    const q = new URLSearchParams(await signLink('k', 'n', 0, 'tokA'));
+    expect(q.get('t')).toBe('tokA');
+    expect(await verifyLink('k', 'n', 0, q.get('s')!, undefined, 'tokA')).toBe(true);
+    expect(await verifyLink('k', 'n', 0, q.get('s')!, undefined, 'admin')).toBe(false);
+    expect(await verifyLink('k', 'n', 0, q.get('s')!, undefined, 'tokB')).toBe(false);
+  });
   it('过期失败', async () => {
     const q = new URLSearchParams(await signLink('k', 'n', 1000));
     expect(await verifyLink('k', 'n', 1000, q.get('s')!, 2000)).toBe(false);
@@ -150,5 +157,15 @@ describe('分批提交 (#12)', () => {
   it('清单格式', () => {
     expect(parseManifest('[{"c":"1","m":2,"b":"3","f":"4","s":5}]').parts).toBe(0);
     expect(parseManifest('{"parts":3}')).toEqual({ parts: 3, refs: [] });
+  });
+});
+
+describe('Content-Type 清洗', () => {
+  it('合法 mime 保留, 非法的按扩展名猜', async () => {
+    const { cleanMime } = await import('../src/lib/util');
+    expect(cleanMime('image/PNG', 'a.bin')).toBe('image/png');
+    expect(cleanMime('text/plain; charset=utf-8', 'a')).toBe('text/plain; charset=utf-8');
+    expect(cleanMime('text/html\r\nX: y', 'a.jpg')).toBe('image/jpeg');
+    expect(cleanMime('', 'a.unknown')).toBe('application/octet-stream');
   });
 });

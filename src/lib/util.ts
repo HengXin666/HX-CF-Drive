@@ -44,6 +44,13 @@ export function splitPath(path: string): string[] {
     .map((s) => decodeURIComponent(s));
 }
 
+/** 只接受 type/subtype (可带 charset), 其余按扩展名猜。避免把任意字符串写进 Content-Type */
+const MIME_RE = /^[\w.+-]+\/[\w.+-]+(;\s*charset=[\w.-]+)?$/i;
+export function cleanMime(mime: string | undefined | null, name: string): string {
+  const m = mime?.trim();
+  return m && m.length <= 100 && MIME_RE.test(m) ? m.toLowerCase() : guessMime(name);
+}
+
 export function guessMime(name: string): string {
   const ext = name.toLowerCase().split('.').pop() ?? '';
   const map: Record<string, string> = {

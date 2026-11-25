@@ -259,12 +259,13 @@ export async function trashNode(env: Env, id: string): Promise<number> {
 }
 
 /** 从回收站恢复: 子孙本来就没动, 只清顶层标记; 原位置重名则加后缀, 原父目录不在了就放回根 */
-export async function restoreNode(env: Env, id: string): Promise<void> {
+export async function restoreNode(env: Env, id: string, fallbackId = 'root'): Promise<void> {
   const node = await env.DB.prepare('SELECT * FROM nodes WHERE id = ?').bind(id).first<NodeRow>();
   // deleted_at = 1 是已提交彻底删除, 不能再恢复
   if (!node || !node.deleted_at || node.deleted_at <= 1) throw new HttpError(404, 'not in trash');
   const parent = node.parent_id ? await getNode(env, node.parent_id) : null;
-  const parentId = parent ? parent.id : 'root';
+  // 原父目录不在了: 放回调用者的根目录 (受限令牌放回 'root' 就再也看不到了)
+  const parentId = parent && (fallbackId === 'root' || (await isWithin(env, parent.id, fallbackId))) ? parent.id : fallbackId;
   let name = node.name;
   if (await childByName(env, parentId, name)) name = `${name} (restored ${new Date().toISOString().slice(0, 19)})`;
   await env.DB.prepare('UPDATE nodes SET parent_id = ?, name = ?, deleted_at = NULL WHERE id = ?').bind(parentId, name, id).run();

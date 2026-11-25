@@ -12,6 +12,18 @@ import type { NodeRow } from '../lib/tree';
 import { HttpError, now } from '../lib/util';
 import { type ChunkRef, PART_SIZE } from './upload';
 
+/**
+ * 用户上传的内容和网页前端同源, 不加限制时上传一个 html / svg 就能读走 localStorage 里的令牌。
+ * sandbox 让文档落到唯一 origin, 脚本不能执行也读不到本站存储; 图片, 视频, 音频照常内联显示。
+ */
+const CSP_CONTENT = "sandbox; default-src 'none'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'unsafe-inline'; font-src 'self' data:";
+const CSP_PDF = "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; object-src 'self'";
+export const SAFE_HEADERS: Record<string, string> = {
+  'X-Content-Type-Options': 'nosniff',
+  'Content-Security-Policy': CSP_CONTENT,
+  'Referrer-Policy': 'no-referrer',
+};
+
 export interface ServeOptions {
   /** 是否允许边缘缓存 (永久签名直链的小文件, 需绑定自定义域名才生效)  */
   edgeCache?: boolean;
@@ -96,7 +108,10 @@ export async function serveNode(env: Env, node: NodeRow, req: Request, opt: Serv
     'Last-Modified': new Date(node.updated_at).toUTCString(),
     'Content-Disposition': `${opt.download ? 'attachment' : 'inline'}; filename*=UTF-8''${encodeURIComponent(node.name)}`,
     'Cache-Control': opt.edgeCache ? 'public, max-age=86400' : 'private, max-age=0',
+    ...SAFE_HEADERS,
   };
+  // PDF 内置查看器在 CSP sandbox 下无法打开, 只给它去掉 sandbox (PDF 里的脚本本身就跑在查看器沙箱里, 碰不到本站)
+  if (node.mime?.startsWith('application/pdf')) base['Content-Security-Policy'] = CSP_PDF;
   // 304 与 HEAD 都不需要读 blob
   if (req.headers.get('If-None-Match') === etag) return new Response(null, { status: 304, headers: base });
   // 空文件: 不碰 blob 和 TG, Range 一律忽略

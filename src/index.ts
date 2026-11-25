@@ -35,7 +35,7 @@ app.use(
 );
 app.use('/f/*', cors({ origin: '*', exposeHeaders: ['Content-Range', 'Content-Length', 'ETag'] }));
 
-app.get('/api/health', (c) => c.json({ ok: true, name: 'HX-CF-Drive', version: '0.3.0' }));
+app.get('/api/health', (c) => c.json({ ok: true, name: 'HX-CF-Drive', version: '0.3.1' }));
 app.route('/api/v1', api);
 app.route('/dav', dav);
 app.route('/', pub);

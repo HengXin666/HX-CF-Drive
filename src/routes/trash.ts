@@ -2,7 +2,7 @@
 import { Hono, type Context } from 'hono';
 import type { AppEnv } from '../env';
 import { requireScope } from '../lib/auth';
-import { assertAccess, type NodeRow, pathsOf, publicNode, restoreNode } from '../lib/tree';
+import { assertAccess, type NodeRow, publicNode, restoreNode } from '../lib/tree';
 import { HttpError } from '../lib/util';
 import { purgeAll } from '../services/purge';
 
@@ -14,16 +14,23 @@ const PURGE_TG_BUDGET = 40;
 
 /** 回收站顶层项目: 父目录没删, 或者父目录是另一次删除的。deleted_at = 1 是已提交彻底删除, 不再列出 */
 async function trashItems(c: C): Promise<NodeRow[]> {
-  const r = await c.env.DB.prepare(
-    `SELECT n.* FROM nodes n LEFT JOIN nodes p ON p.id = n.parent_id
-     WHERE n.deleted_at > 1 AND (p.deleted_at IS NULL OR p.deleted_at <> n.deleted_at)
-     ORDER BY n.deleted_at DESC LIMIT 200`,
-  ).all<NodeRow>();
   const p = c.get('principal');
-  if (p.rootId === 'root') return r.results;
-  // 受限令牌只看自己根下的
-  const paths = await pathsOf(c.env, r.results);
-  return r.results.filter((n) => paths.get(n.id)?.ancestors.has(p.rootId));
+  if (p.rootId === 'root') {
+    return (await c.env.DB.prepare(
+      `SELECT n.* FROM nodes n LEFT JOIN nodes p ON p.id = n.parent_id
+       WHERE n.deleted_at > 1 AND (p.deleted_at IS NULL OR p.deleted_at <> n.deleted_at)
+       ORDER BY n.deleted_at DESC LIMIT 200`,
+    ).all<NodeRow>()).results;
+  }
+  // 受限令牌: 在自己子树的目录里找 (含已删除的目录), 不能先全局 LIMIT 再过滤, 否则别人的回收站一多就看不到自己的
+  return (await c.env.DB.prepare(
+    `WITH RECURSIVE sub(id, del) AS (
+       SELECT id, deleted_at FROM nodes WHERE id = ?1
+       UNION ALL SELECT n.id, n.deleted_at FROM nodes n JOIN sub ON n.parent_id = sub.id WHERE n.kind = 'dir' AND (n.deleted_at IS NULL OR n.deleted_at > 1) LIMIT 20000
+     ) SELECT n.* FROM nodes n JOIN sub ON n.parent_id = sub.id
+       WHERE n.deleted_at > 1 AND (sub.del IS NULL OR sub.del <> n.deleted_at)
+       ORDER BY n.deleted_at DESC LIMIT 200`,
+  ).bind(p.rootId).all<NodeRow>()).results;
 }
 
 trash.get('/trash', requireScope('write'), async (c) => {
@@ -34,7 +41,7 @@ trash.get('/trash', requireScope('write'), async (c) => {
 trash.post('/restore', requireScope('write'), async (c) => {
   const { id } = await c.req.json<{ id: string }>();
   await assertAccess(c.env, c.get('principal'), id);
-  await restoreNode(c.env, id);
+  await restoreNode(c.env, id, c.get('principal').rootId);
   return c.json({ ok: true });
 });
 

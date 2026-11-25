@@ -2,6 +2,7 @@
 import { Hono } from 'hono';
 import type { AppEnv, Env } from '../env';
 import { verifyLink } from '../lib/sign';
+import { tokenAlive } from '../lib/auth';
 import { getNode, getNodeCached, listChildren, type NodeRow, publicNode, resolvePath } from '../lib/tree';
 import { HttpError, sha256Hex } from '../lib/util';
 import { serveNode } from '../services/serve';
@@ -19,7 +20,9 @@ pub.on(['GET', 'HEAD'], ['/f/:id', '/f/:id/:name'], async (c) => {
   const id = c.req.param('id');
   const exp = Number(c.req.query('e') ?? 'x');
   const sig = c.req.query('s') ?? '';
-  if (!Number.isFinite(exp) || !(await verifyLink(c.env.SIGNING_KEY, id, exp, sig))) throw new HttpError(403, 'bad or expired signature');
+  const tid = c.req.query('t') || 'admin';
+  if (!Number.isFinite(exp) || !(await verifyLink(c.env.SIGNING_KEY, id, exp, sig, undefined, tid))) throw new HttpError(403, 'bad or expired signature');
+  if (!(await tokenAlive(c.env, tid))) throw new HttpError(403, 'link revoked');
   const node = await cachedNode(c.env, id);
   return serveNode(c.env, node, c.req.raw, {
     edgeCache: exp === 0,
