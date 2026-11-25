@@ -65,7 +65,7 @@ export interface Stats {
   bots: { id: string; username: string | null; status: string; last_error: string | null }[];
   channels: { id: string; title: string; status: string }[];
 }
-export interface TokenRow { id: string; name: string; scopes: string; root_id: string; expires_at: number | null; created_at: number }
+export interface TokenRow { id: string; name: string; scopes: string; root_id: string; root_path: string; expires_at: number | null; created_at: number }
 export const admin = {
   stats: () => api<Stats>('GET', '/admin/stats'),
   addBot: (token: string) => api<{ username: string; channels: Record<string, string> }>('POST', '/admin/bots', { token }),

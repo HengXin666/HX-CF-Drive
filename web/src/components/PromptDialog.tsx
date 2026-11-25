@@ -8,6 +8,10 @@ export interface PromptRequest {
   title: string;
   fields: PromptField[];
   okText?: string;
+  /** 输入框上方的说明 */
+  note?: string;
+  /** 确定按钮用危险色 */
+  danger?: boolean;
   onOk: (values: Record<string, string>) => Promise<void> | void;
 }
 
@@ -41,6 +45,7 @@ export function PromptDialog({ req, onClose }: { req: PromptRequest | null; onCl
         <DialogHeader>
           <DialogTitle>{req?.title}</DialogTitle>
         </DialogHeader>
+        {req?.note && <p className="text-sm whitespace-pre-line text-muted-foreground">{req.note}</p>}
         <form
           className="flex flex-col gap-3"
           onSubmit={(e) => {
@@ -63,7 +68,7 @@ export function PromptDialog({ req, onClose }: { req: PromptRequest | null; onCl
           {err && <p className="text-sm text-danger-fg">{err}</p>}
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={onClose}>取消</Button>
-            <Button type="submit" variant="primary" loading={busy}>{req?.okText ?? '确定'}</Button>
+            <Button type="submit" variant={req?.danger ? 'destructive' : 'primary'} loading={busy}>{req?.okText ?? '确定'}</Button>
           </DialogFooter>
         </form>
       </DialogContent>

@@ -6,7 +6,7 @@ import { PromptDialog, type PromptRequest } from '../components/PromptDialog';
 import { Page } from '../components/Shell';
 import { UploadQueue, useUploadQueue } from '../components/UploadQueue';
 import { fileIcon } from '../icons';
-import { ApiError, fmtSize, fmtTime, fs, joinPath, type Node, shares } from '../lib/api';
+import { admin, ApiError, fmtSize, fmtTime, fs, joinPath, type Node, shares, type TokenRow } from '../lib/api';
 import { download } from '../lib/transfer';
 import {
   Button, confirmDialog, DataTable, type DataTableColumn, DropdownMenu, DropdownMenuContent, DropdownMenuItem,
@@ -14,6 +14,18 @@ import {
 } from '../ui';
 
 const parentOf = (p: string) => p.replace(/\/[^/]+\/?$/, '') || '/';
+const within = (p: string, dir: string) => dir === '/' || p === dir || p.startsWith(dir + '/');
+
+/**
+ * 受影响的令牌: 只限定在某个子目录的令牌 (如 AIOA 的 /aioa) 按节点 id 引用文件,
+ * 在目录内改名, 移动都不影响它; 删掉 (进回收站) 或移出它的根目录后, 持有令牌的服务就找不到了。
+ * inside: 节点在令牌根目录里; holds: 节点就是或包含令牌根目录。
+ */
+function tokensAt(tokens: TokenRow[], p: string) {
+  const scoped = tokens.filter((t) => t.root_path && t.root_path !== '/');
+  return { inside: scoped.filter((t) => within(p, t.root_path) && p !== t.root_path), holds: scoped.filter((t) => within(t.root_path, p)) };
+}
+const names = (ts: TokenRow[]) => ts.map((t) => `${t.name} (${t.root_path})`).join(', ');
 
 async function copy(text: string, what: string) {
   await navigator.clipboard.writeText(text);
@@ -48,6 +60,9 @@ export function Files({ path, go, onChange }: { path: string; go: (p: string) =>
   const [preview, setPreview] = useState<PreviewTarget | null>(null);
   const [drag, setDrag] = useState(false);
   const picker = useRef<HTMLInputElement>(null);
+  // 只有管理员能列令牌; 其他令牌拿不到就当没有
+  const [tokens, setTokens] = useState<TokenRow[]>([]);
+  useEffect(() => { admin.tokens().then((r) => setTokens(r.items), () => setTokens([])); }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -104,10 +119,46 @@ export function Files({ path, go, onChange }: { path: string; go: (p: string) =>
       await copy(r.url, '分享链接');
     },
   });
+  const pathOfNode = (n: Node) => n.path ?? joinPath(path, n.name);
+  /** 删除或移出令牌根目录时的提醒; 没有受影响的令牌返回空串 */
+  const tokenWarn = (n: Node, verb: string) => {
+    const { inside, holds } = tokensAt(tokens, pathOfNode(n));
+    if (holds.length) return `这是令牌 ${names(holds)} 的根目录或包含它, ${verb}后这些令牌的服务会找不到其中所有文件, 新上传也会失败。`;
+    if (inside.length) return `位于令牌 ${names(inside)} 的根目录里, ${verb}后持有令牌的服务会找不到它 (在目录内改名, 移动不受影响)。`;
+    return '';
+  };
   const remove = async (n: Node) => {
-    if (await confirmDialog({ title: `删除 ${n.name}?`, message: '会放进回收站, 保留期内可以恢复。', confirmLabel: '删除', variant: 'danger' })) {
+    const warn = tokenWarn(n, '删除');
+    if (n.kind === 'dir') {
+      // 目录: 像删 GitHub 仓库一样手动输入目录名确认
+      setPrompt({
+        title: `删除目录 ${n.name}?`,
+        note: `目录和里面的所有内容都会放进回收站, 保留期内可以恢复。${warn ? '\n' + warn : ''}`,
+        fields: [{ key: 'confirm', label: `输入目录名 ${n.name} 确认`, placeholder: n.name }],
+        okText: '删除',
+        danger: true,
+        onOk: async (v) => {
+          if (v.confirm.trim() !== n.name) throw new Error('目录名不一致');
+          await act(() => fs.remove(n.id), '已移入回收站');
+        },
+      });
+      return;
+    }
+    if (await confirmDialog({ title: `删除 ${n.name}?`, message: `会放进回收站, 保留期内可以恢复。${warn ? ' ' + warn : ''}`, confirmLabel: '删除', variant: 'danger' })) {
       await act(() => fs.remove(n.id), '已移入回收站');
     }
+  };
+  /** 移动: 移出令牌根目录时先提醒; 挪动根目录本身不影响, 令牌按 id 跟随 */
+  const moveTo = async (n: Node, to: string) => {
+    const { inside } = tokensAt(tokens, pathOfNode(n));
+    const lost = inside.filter((t) => !within(to, t.root_path));
+    if (lost.length && !(await confirmDialog({
+      title: "移出令牌目录?",
+      message: `${n.name} 位于令牌 ${names(lost)} 的根目录里, 移到 ${to} 后持有令牌的服务会找不到它。`,
+      confirmLabel: '仍然移动',
+      variant: 'danger',
+    }))) return;
+    await act(() => fs.move(n.id, to, n.name), '已移动');
   };
   const wrap = (fn: () => unknown) => () => { Promise.resolve(fn()).catch((e) => toast.error((e as Error).message)); };
 
@@ -149,7 +200,7 @@ export function Files({ path, go, onChange }: { path: string; go: (p: string) =>
             }))}
             {item('move', '移动到', () => setPrompt({
               title: '移动到', fields: [{ key: 'to', label: '目标目录', value: n.path ? parentOf(n.path) : path }],
-              onOk: async (v) => act(() => fs.move(n.id, v.to.trim() || '/', n.name), '已移动'),
+              onOk: async (v) => moveTo(n, v.to.trim() || '/'),
             }))}
             <DropdownMenuSeparator />
             {item('trash', '删除', () => remove(n), true)}

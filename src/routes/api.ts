@@ -7,6 +7,7 @@ import { forgetToken, requireScope } from '../lib/auth';
 import { signLink } from '../lib/sign';
 import {
   assertAccess, getNode, getNodeCached, listChildren, mkdirp, moveNode, type NodeRow, pathFor, pathsOf, publicNode, resolvePath, trashNode,
+  pathOf,
 } from '../lib/tree';
 import { HttpError, newId, now, sha256Hex } from '../lib/util';
 import { runMaintenance } from '../services/maintenance';
@@ -390,8 +391,10 @@ api.post('/admin/tokens', requireScope('admin'), async (c) => {
 });
 
 api.get('/admin/tokens', requireScope('admin'), async (c) => {
-  const r = await c.env.DB.prepare('SELECT id, name, scopes, root_id, expires_at, created_at FROM tokens ORDER BY created_at DESC').all();
-  return c.json({ items: r.results });
+  const r = await c.env.DB.prepare('SELECT id, name, scopes, root_id, expires_at, created_at FROM tokens ORDER BY created_at DESC').all<{ root_id: string }>();
+  // 带上根目录的路径: 前端删除或移出某个令牌的根目录时据此提醒 (持有令牌的服务会找不到文件)
+  const items = await Promise.all(r.results.map(async (t) => ({ ...t, root_path: await pathOf(c.env, t.root_id) })));
+  return c.json({ items });
 });
 
 /** 吊销令牌: 它签的直链随之失效 (见 tokenAlive), 它建的分享一并删除 */
