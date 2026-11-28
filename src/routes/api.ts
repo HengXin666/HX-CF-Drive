@@ -3,7 +3,7 @@ import { Hono, type Context } from 'hono';
 import type { AppEnv, Env } from '../env';
 import { num, publicOrigin } from '../env';
 import { activeChannels, allBots, invalidateBotCache, invalidateChannelCache, tgCall } from '../drivers/tg';
-import { extractToken, forgetToken, requireScope } from '../lib/auth';
+import { forgetToken, requireScope } from '../lib/auth';
 import { signLink } from '../lib/sign';
 import {
   assertAccess, getNode, getNodeCached, listChildren, mkdirp, moveNode, type NodeRow, pathFor, pathsOf, publicNode, resolvePath, trashNode,
@@ -203,7 +203,8 @@ api.post('/uploads', requireScope('write'), async (c) => {
  * 第 2 步: 上传分片, 请求体是原始字节。?ticket=...&i=序号。返回回执, 客户端自己保存。
  * 带令牌时校验令牌与票据属于同一令牌; 不带 Authorization 时只凭票据 (v0.4, 见 openTicketBare)。
  */
-api.put('/uploads/chunk', async (c, next) => (extractToken(c.req.raw) ? requireScope('write')(c, next) : next()), async (c) => {
+// 只要带了 Authorization (哪怕是空的或格式不对) 就按令牌校验, 坏令牌照样 401, 不退回只凭票据
+api.put('/uploads/chunk', async (c, next) => (c.req.raw.headers.has('Authorization') ? requireScope('write')(c, next) : next()), async (c) => {
   const sealed = c.req.query('ticket') ?? '';
   const p = c.get('principal');
   const t = p ? await openTicket(c.env, p, sealed) : await openTicketBare(c.env, sealed);

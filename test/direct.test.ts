@@ -52,6 +52,8 @@ describe('只凭票据传分片 (v0.4)', () => {
     expect(bare.status).toBe(400);
     const wrong = await app.request('/api/v1/uploads/chunk?i=0&ticket=bad', { ...init, headers: { ...init.headers, authorization: 'Bearer nope' } }, env);
     expect(wrong.status).toBe(401);
+    const empty = await app.request('/api/v1/uploads/chunk?i=0&ticket=bad', { ...init, headers: { ...init.headers, authorization: 'Token x' } }, env);
+    expect(empty.status).toBe(401);
   });
 });
 
