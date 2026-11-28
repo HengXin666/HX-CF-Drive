@@ -458,8 +458,12 @@ api.get('/admin/topology', requireScope('admin'), async (c) => {
     c.env.DB.prepare('SELECT id, token, username, status FROM bots ORDER BY created_at'),
     c.env.DB.prepare('SELECT id, title, status FROM channels ORDER BY created_at'),
   ]);
+  // 分片统计要 json_each 全部清单 (读行 = blobs + blob_parts), 只在明确要时算 (#23): ?usage=1 用 10 分钟缓存, ?fresh=1 重算;
+  // 都不带时只回 Bot 和频道, 本 isolate 里恰好有未过期的统计就顺带给出 (不花读行), 否则 usage 为 null
   const fresh = c.req.query('fresh') === '1';
-  if (fresh || !topoCache || now() - topoCache.at > 600_000) {
+  const want = fresh || c.req.query('usage') === '1';
+  const stale = !topoCache || now() - topoCache.at > 600_000;
+  if (fresh || (want && stale)) {
     // 整份清单 (数组) 在 blobs.manifest, 分段清单在 blob_parts.refs; 两处的元素都是 {c,m,b,f,s}
     const r = await c.env.DB.prepare(
       `SELECT json_extract(j.value, '$.c') AS c, json_extract(j.value, '$.b') AS b, COUNT(*) AS n, SUM(json_extract(j.value, '$.s')) AS bytes
@@ -483,11 +487,12 @@ api.get('/admin/topology', requireScope('admin'), async (c) => {
     }
     await Promise.all(jobs);
   }
+  const usage = topoCache && (want || !stale) ? topoCache : null;
   return c.json({
-    at: topoCache.at,
+    at: usage?.at ?? null,
     bots: botRows.map(({ token: _t, ...b }) => b),
     channels: chanRows,
-    usage: topoCache.usage,
+    usage: usage?.usage ?? null,
     perms,
   });
 });

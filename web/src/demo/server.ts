@@ -263,7 +263,9 @@ on('GET', '/admin/topology', 'admin', (c) => {
   }
   const perms: Record<string, string> = {};
   if (c.url.searchParams.get('check') === '1') for (const b of bots) for (const ch of s.channels) if (ch.status !== 'dead') perms[`${b.id}|${ch.id}`] = 'ok';
-  return json(200, { at: now(), bots: s.bots, channels: s.channels, usage: [...usage.values()], perms });
+  // 和服务端一致 (#23): 只在 usage=1 / fresh=1 时给分片统计
+  const want = c.url.searchParams.get('usage') === '1' || c.url.searchParams.get('fresh') === '1';
+  return json(200, { at: want ? now() : null, bots: s.bots, channels: s.channels, usage: want ? [...usage.values()] : null, perms });
 });
 
 const adminCheck = () => Object.fromEntries(state().channels.filter((c) => c.status === 'active').map((c) => [c.id, 'ok']));

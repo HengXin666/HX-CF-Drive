@@ -15,15 +15,21 @@ type Edge = { b: string; c: string; n: number; bytes: number; perm?: string; wri
 
 export function Topology() {
   const [t, setT] = useState<Topo | null>(null);
-  const [busy, setBusy] = useState<'' | 'check' | 'fresh'>('');
+  const [busy, setBusy] = useState<'' | 'check' | 'fresh' | 'usage'>('');
   const [hover, setHover] = useState<string | null>(null);
 
-  const load = useCallback(async (check = false, fresh = false) => {
-    setBusy(check ? 'check' : fresh ? 'fresh' : '');
+  // 打开页面只拉 Bot 和频道 (#23); 分片统计要扫全部清单, 点按钮才算
+  const load = useCallback(async (check = false, fresh = false, usage = false) => {
+    setBusy(check ? 'check' : fresh ? 'fresh' : usage ? 'usage' : '');
     try {
-      const r = await admin.topology(check, fresh);
-      // 权限检查结果留着, 只重新统计时不清掉
-      setT((old) => (check || !old ? r : { ...r, perms: old.perms }));
+      const r = await admin.topology(check, fresh, usage);
+      // 权限检查结果和已有的分片统计留着, 不因为别的操作清掉
+      setT((old) => ({
+        ...r,
+        at: r.usage ? r.at : old?.at ?? null,
+        usage: r.usage ?? old?.usage ?? null,
+        perms: check || !old ? r.perms : old.perms,
+      }));
       if (check) {
         const bad = Object.values(r.perms).filter((v) => !v.startsWith('ok') && v !== 'unchecked').length;
         if (bad) toast.warning(`${bad} 对 Bot 和频道的权限有问题, 红线标出`);
@@ -45,7 +51,7 @@ export function Topology() {
       edges.set(`${b.id}|${c.id}`, { b: b.id, c: c.id, n: 0, bytes: 0, writable: true });
     }
     // 已经存了分片的线 (含失效 Bot, 只读频道)
-    for (const u of t.usage) {
+    for (const u of t.usage ?? []) {
       const k = `${u.b}|${u.c}`;
       const e = edges.get(k) ?? { b: u.b, c: u.c, n: 0, bytes: 0, writable: false };
       e.n += u.n;
@@ -66,7 +72,8 @@ export function Topology() {
     return { edges: [...edges.values()], bots, channels, H, max };
   }, [t]);
 
-  const total = t?.usage.reduce((a, u) => ({ n: a.n + u.n, bytes: a.bytes + u.bytes }), { n: 0, bytes: 0 });
+  const counted = !!t?.usage;
+  const total = t?.usage?.reduce((a, u) => ({ n: a.n + u.n, bytes: a.bytes + u.bytes }), { n: 0, bytes: 0 });
   const liveBots = t?.bots.filter((b) => b.status === 'active').length ?? 0;
   const liveChans = t?.channels.filter((c) => c.status === 'active').length ?? 0;
   const at = (id: string) => hover === null || hover === id || hover.split('|').includes(id);
@@ -77,11 +84,13 @@ export function Topology() {
         <div className="grid gap-0.5">
           <div className="flex items-center gap-2 font-semibold"><Icon name="tree" className="size-4 text-brand" />存储拓扑</div>
           <div className="text-xs text-muted-foreground">
-            {t ? <>{liveBots} / {t.bots.length} 个 Bot 可用, 写入 {liveChans} / {t.channels.length} 个频道, 共 {total?.n ?? 0} 片 · {fmtSize(total?.bytes ?? 0)}</> : <span className="inline-flex items-center gap-1.5"><Icon name="spinner" className="size-3.5 animate-spin" />加载中…</span>}
+            {t ? <>{liveBots} / {t.bots.length} 个 Bot 可用, 写入 {liveChans} / {t.channels.length} 个频道, {counted ? <>共 {total?.n ?? 0} 片 · {fmtSize(total?.bytes ?? 0)}</> : '分片未统计'}</> : <span className="inline-flex items-center gap-1.5"><Icon name="spinner" className="size-3.5 animate-spin" />加载中…</span>}
           </div>
         </div>
         <div className="flex gap-1.5">
-          <Button size="sm" variant="outline" loading={busy === 'fresh'} onClick={() => void load(false, true)}><Icon name="refresh" /><span className="hidden sm:inline">重新统计</span></Button>
+          {counted
+            ? <Button size="sm" variant="outline" loading={busy === 'fresh'} onClick={() => void load(false, true)}><Icon name="refresh" /><span className="hidden sm:inline">重新统计</span></Button>
+            : <Button size="sm" variant="outline" loading={busy === 'usage'} onClick={() => void load(false, false, true)}><Icon name="database" /><span className="hidden sm:inline">统计分片</span></Button>}
           <Button size="sm" variant="outline" loading={busy === 'check'} onClick={() => void load(true)}><Icon name="shield" /><span className="hidden sm:inline">检查权限</span></Button>
         </div>
       </div>
@@ -103,7 +112,7 @@ export function Topology() {
                   strokeDasharray={e.writable ? undefined : '5 4'}
                   className={cn('transition-opacity', bad ? 'stroke-destructive' : e.n ? 'stroke-brand' : 'stroke-muted-foreground/40', !at(e.b) && !at(e.c) && hover !== k ? 'opacity-15' : e.n ? 'opacity-80' : 'opacity-100')}
                   onMouseEnter={() => setHover(k)} onMouseLeave={() => setHover(null)}>
-                  <title>{`@${b.username ?? b.id} → ${c.title || c.id}\n${e.n} 片 · ${fmtSize(e.bytes)}${e.writable ? '' : '\n(不再写入, 只读取)'}${e.perm ? `\n权限: ${e.perm}` : ''}`}</title>
+                  <title>{`@${b.username ?? b.id} → ${c.title || c.id}${counted ? `\n${e.n} 片 · ${fmtSize(e.bytes)}` : ''}${e.writable ? '' : '\n(不再写入, 只读取)'}${e.perm ? `\n权限: ${e.perm}` : ''}`}</title>
                 </path>
               );
             })}
@@ -113,7 +122,7 @@ export function Topology() {
                 <rect width={BOX_W} height={BOX_H} rx={8} className={cn('fill-card', b.status === 'active' ? 'stroke-border' : 'stroke-destructive/60')} strokeWidth={1} />
                 <circle cx={14} cy={BOX_H / 2} r={4} className={b.status === 'active' ? 'fill-emerald-500' : 'fill-destructive'} />
                 <text x={26} y={19} className="fill-foreground font-mono text-[12px]">{cut(`@${b.username ?? b.id}`, 28)}</text>
-                <text x={26} y={35} className="fill-muted-foreground text-[11px]">{b.status === 'active' ? `${b.n} 片 · ${fmtSize(b.bytes)}` : `失效 · ${b.n} 片待重绑`}</text>
+                <text x={26} y={35} className="fill-muted-foreground text-[11px]">{!counted ? (b.status === 'active' ? '可用' : '失效') : b.status === 'active' ? `${b.n} 片 · ${fmtSize(b.bytes)}` : `失效 · ${b.n} 片待重绑`}</text>
                 <title>{`@${b.username ?? b.id} (${b.id})\n状态: ${b.status}`}</title>
               </g>
             ))}
@@ -123,7 +132,7 @@ export function Topology() {
                 <rect width={BOX_W} height={BOX_H} rx={8} className={cn('fill-card', c.status === 'active' ? 'stroke-border' : c.status === 'readonly' ? 'stroke-amber-500/70' : 'stroke-destructive/60')} strokeWidth={1}
                   strokeDasharray={c.status === 'readonly' ? '4 3' : undefined} />
                 <text x={12} y={19} className="fill-foreground text-[12px]">{cut(c.title || c.id, 20)}{c.status !== 'active' ? (c.status === 'readonly' ? ' · 只读' : ' · 失效') : ''}</text>
-                <text x={12} y={35} className="fill-muted-foreground font-mono text-[11px]">{`${c.n} 片 · ${fmtSize(c.bytes)}`}</text>
+                <text x={12} y={35} className="fill-muted-foreground font-mono text-[11px]">{counted ? `${c.n} 片 · ${fmtSize(c.bytes)}` : c.id}</text>
                 <title>{`${c.title || ''} ${c.id}\n状态: ${c.status}`}</title>
               </g>
             ))}
