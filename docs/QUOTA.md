@@ -137,6 +137,10 @@ D1 读行几乎全部来自搜索的最坏情况。不搜索或搜索大多命�
 | 维护: 到期清理 | 1 | ≈ 到期行数 | ≈ 2 × 到期行数 | 0 | 走 `idx_nodes_expires` 部分索引, 没有到期的只读 0 行; 移进回收站 (`deleted_at = expires_at`), 之后按回收站规则硬删并删 TG 消息 |
 | `POST /fs/fetch` (URL 上传, ≤ 3 片) | 同一次性上传 | 同一次性上传 | 同一次性上传 (约 4 行 + mkdir) | 1 次远程 fetch + 每片 1 次 sendDocument | 一次请求最多 3 片 (≈ 57 MiB), 远远低于 50 个子请求; 内容流式直通, 不缓冲 (没有 Content-Length 时最多缓冲 1 片) |
 | `POST /uploads/fetch` (续拉 3 片) | 0 | 0 | 0 | 1 次远程 Range fetch + 3 次 sendDocument | 和分片上传一样无服务端状态, 中断后从 `next` 接着拉; 远程不支持 Range 时超过 3 片返回 413 |
+| 分享下载 (设了 `maxDownloads`) | 2 | 2 | 1 | 同普通分享 | 读分享 1 行 + 条件 `UPDATE ... WHERE downloads < max_downloads` 1 行 (原子, 多 isolate 也不会超); HEAD 和续传 (Range 不从 0 开始) 不计数 |
+| 分享下载 (没设上限) | 1 | 1 | 0 | 同普通分享 | 和原来完全一样, 不写 D1 |
+| `POST /fs/star` (加星 / 取消) | 2 | ≈ 祖先链 | 1 | 0 | `stars` 表 WITHOUT ROWID 复合主键, 只有 1 行写, 没有额外索引 |
+| `GET /fs/stars` | 2 | ≈ 收藏数 + 祖先目录数 | 0 | 0 | 按主键前缀 (owner) 扫 + 一条 `pathsOf`; 前端只在打开文件页时取一次 |
 | 读到期文件 | 同普通读 | 同普通读 | 0 | 0 | 维护清理之前也直接返回 410, 不读 TG; 祖先目录到期也按已删除处理 |
 
 ## 8. 本地验证情况

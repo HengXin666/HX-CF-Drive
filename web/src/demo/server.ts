@@ -264,6 +264,23 @@ on('POST', '/fs/fetch', 'write', async (c) => {
 });
 on('POST', '/uploads/fetch', 'write', () => { throw new HttpError(400, 'demo url upload is single-shot'); });
 
+// 收藏 (#22), 同 /fs/stars 与 /fs/star
+on('GET', '/fs/stars', 'read', () => {
+  const st = state().stars ?? {};
+  const items = Object.entries(st).sort((a, b) => b[1] - a[1]).flatMap(([id, at]) => {
+    const n = getNode(id);
+    return n ? [{ ...publicNode(n), path: pathOf(n), starredAt: at }] : [];
+  });
+  return json(200, { items });
+});
+on('POST', '/fs/star', 'read', async (c) => {
+  const b = await c.body();
+  const n = locate(b.id, b.path);
+  const st = (state().stars ??= {});
+  if (b.on === false) delete st[n.id]; else st[n.id] ??= now();
+  return json(200, { ok: true, starred: b.on !== false });
+});
+
 // 一次性上传: multipart 字段 file (可多个), 或原始 body + ?name=
 on('POST', '/upload', 'write', async ({ req, url }) => {
   const parent = mkdirp(url.searchParams.get('path') ?? '/');
@@ -294,7 +311,7 @@ on('POST', '/shares', 'read', async (c) => {
   const b = await c.body();
   const n = locate(b.id, b.path);
   const id = newId(10);
-  state().shares.unshift({ id, nodeId: n.id, password: str(b.password) ?? null, expiresAt: Number(b.expiresIn) ? now() + Number(b.expiresIn) * 1000 : null, createdAt: now(), remark: str(b.remark)?.trim().slice(0, 200) ?? null });
+  state().shares.unshift({ id, nodeId: n.id, password: str(b.password) ?? null, expiresAt: Number(b.expiresIn) ? now() + Number(b.expiresIn) * 1000 : null, createdAt: now(), remark: str(b.remark)?.trim().slice(0, 200) ?? null, maxDownloads: maxDl(b.maxDownloads), downloads: 0 });
   return json(200, { id, url: shareLink(id) });
 });
 
@@ -305,8 +322,15 @@ on('GET', '/shares', 'read', () => json(200, {
   }),
 }));
 
+function maxDl(v: unknown): number | null {
+  if (v === undefined || v === null || v === '' || Number(v) === 0) return null;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 1 || n > 1_000_000) throw new HttpError(400, 'maxDownloads must be 1..1000000');
+  return n;
+}
 const shareRow = (s: DShare, name: string) => ({
   id: s.id, node_id: s.nodeId, name, expires_at: s.expiresAt, created_at: s.createdAt, has_password: s.password ? 1 : 0, disabled: s.disabled ? 1 : 0, remark: s.remark ?? null,
+  max_downloads: s.maxDownloads ?? null, downloads: s.downloads ?? 0,
 });
 
 // 编辑分享 (#22), 同 PATCH /shares/:id: 只改传了的字段
@@ -318,6 +342,8 @@ on('PATCH', '/shares/([^/]+)', 'write', async (c, m) => {
   if ('expiresIn' in b) s.expiresAt = Number(b.expiresIn) > 0 ? now() + Number(b.expiresIn) * 1000 : null;
   if ('disabled' in b) s.disabled = !!b.disabled;
   if ('remark' in b) s.remark = str(b.remark)?.trim().slice(0, 200) ?? null;
+  if ('maxDownloads' in b) s.maxDownloads = maxDl(b.maxDownloads);
+  if (b.resetDownloads) s.downloads = 0;
   return json(200, { share: shareRow(s, state().nodes[s.nodeId]?.name ?? '') });
 });
 

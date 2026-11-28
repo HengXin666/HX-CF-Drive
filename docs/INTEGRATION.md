@@ -39,6 +39,8 @@ curl -X POST -H "Authorization: Bearer $ADMIN" -H "Content-Type: application/jso
 | POST | `/api/v1/fs/batch` `{op, ids \| items, toPath, overwrite}` | 批量 move / copy / delete / restore / rename, 一个 D1 batch; 失败项在 `failed` |
 | POST | `/api/v1/fs/links` `{ids, expiresIn}` | 批量签直链 (≤ 200 个), 无效 id 进 `missing` |
 | POST | `/api/v1/fs/fetch` `{url, path或parentId, name, overwrite, expiresIn}` | URL 远程上传: Worker 拉远程内容流式写进 TG。≤ 3 片 (≈ 57 MiB) 一次完成, 返回 `{done:true, node, url}`; 更大的返回 `{done:false, ticket, receipts, next, chunkCount}`, 接着用 `POST /api/v1/uploads/fetch {ticket, url, from: next}` 续拉 (远程须支持 Range), 拿到 `next: null` 后把全部回执交给 `/uploads/commit`。远程非 2xx 返回 502, 没有 Content-Length 时限 1 片 |
+| GET | `/api/v1/fs/stars` | 收藏列表 (每个令牌各自收藏, 最新在前, 带 `path` / `starredAt`, 已删除的不列) |
+| POST | `/api/v1/fs/star` `{id或path, on}` | 加星 / 取消 (`on: false`); read scope 即可 |
 | POST | `/api/v1/fs/expire` `{id或path, expiresIn}` | 文件到期自动删除 (TTL): expiresIn 秒 (60 ~ 10 年), `null` 取消; 到期后访问返回 410, 定时维护移进回收站 (目录连同内容)。上传接口 (`/upload?expiresIn=`, `/uploads` 的 `expiresIn`, MCP `upload`) 也能直接带 |
 | GET | `/api/v1/fs/manifest?id=` | 分片清单 `{size, chunkSize, chunks: [{bot, fileId, size}]}`; 持有对应 Bot 令牌的客户端可直接从 TG 拉取 (read, 只限自己的子树; file_id 没有 Bot 令牌用不了) |
 | GET | `/api/v1/files/:id/content` | 读取内容, 支持 Range, `?download=1` |
@@ -48,7 +50,7 @@ curl -X POST -H "Authorization: Bearer $ADMIN" -H "Content-Type: application/jso
 | POST | `/api/v1/uploads/fold` `{ticket, receipts}` | 分片上传 (可选): 一组 256 片的回执换一个聚合回执 fold |
 | POST | `/api/v1/uploads/commit` `{ticket, receipts, folds}` | 分片上传: 提交回执和聚合回执 |
 | POST/GET/DELETE | `/api/v1/shares` | 分享链接 (创建时可带 `remark`) |
-| PATCH | `/api/v1/shares/:id` `{password, expiresIn, disabled, remark}` | 编辑分享, 只改传了的字段; `password: null` 去掉密码, `expiresIn: null` 永久, 停用后访问返回 410 |
+| PATCH | `/api/v1/shares/:id` `{password, expiresIn, disabled, remark, maxDownloads, resetDownloads}` | 编辑分享, 只改传了的字段; `password: null` 去掉密码, `expiresIn: null` 永久, 停用后访问返回 410; `maxDownloads` 下载次数上限 (创建时也能带, `null` 不限也不计数), 用完返回 410, `resetDownloads: true` 清零 |
 | GET | `/f/:id/:name?e=&s=` | 签名直链 (公开) |
 | GET | `/s/:id?path=子路径` | 分享 (公开); 有密码时用 `X-Share-Password` 头 (也接受 `?p=`, 但会进日志和历史), 连错 10 次锁 15 分钟。浏览器打开 (`Accept: text/html`) 时返回页面 (v0.4): 密码输入, 文件夹列表, 下载按钮; `?download=1` 下载, `?raw=1` 照旧返回 JSON / 文件本身。页面里的密码表单 `POST /s/:id` (表单字段 `p`, `path`), 输对后发一个只对该分享有效 1 天的 HttpOnly Cookie, 之后的链接不带密码 |
 | * | `/api/v1/admin/*` | 管理: stats, bots, channels, tokens, maintenance |

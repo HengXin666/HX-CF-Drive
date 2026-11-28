@@ -212,6 +212,56 @@ if (sect('ttl')) {
   }
 }
 
+if (sect('sharecap')) {
+  const D = `${P}/sharecap`;
+  const f = await put(D, 'a.txt', 'abcdef');
+  const sh = (await j('POST', '/api/v1/shares', { id: f.id, maxDownloads: 2 }, {}, 'shares 创建带 maxDownloads')).body;
+  const raw = (q = '', h = {}) => fetch(`${sh.url}?raw=1${q}`, { headers: h });
+  ok((await raw('', { Range: 'bytes=2-' })).status === 206, '续传 (Range 不从 0 开始) 不计数');
+  const r1 = await raw();
+  if (r1.headers.get('X-D1-Rows')) meter.push(['分享下载 (计数)', r1.headers.get('X-D1-Rows')]);
+  ok(r1.status === 200 && (await r1.text()) === 'abcdef', '第 1 次下载');
+  ok((await raw()).status === 200, '第 2 次下载');
+  ok((await raw()).status === 410, '第 3 次 410');
+  const page = await fetch(sh.url, { headers: { Accept: 'text/html' } });
+  ok(page.status === 410 && (await page.text()).includes('下载次数已用完'), '浏览器打开显示 "下载次数已用完"');
+  let row = (await j('GET', '/api/v1/shares')).body.items.find((s) => s.id === sh.id);
+  ok(row.max_downloads === 2 && row.downloads === 2, '分享列表带 max_downloads / downloads');
+  row = (await j('PATCH', `/api/v1/shares/${sh.id}`, { resetDownloads: true, maxDownloads: 3 })).body.share;
+  ok(row.downloads === 0 && row.max_downloads === 3 && (await raw()).status === 200, '清零并改上限后又能下载');
+  row = (await j('PATCH', `/api/v1/shares/${sh.id}`, { maxDownloads: null })).body.share;
+  for (let i = 0; i < 4; i++) await raw();
+  ok((await j('GET', '/api/v1/shares')).body.items.find((s) => s.id === sh.id).downloads === 1, '去掉上限后不再计数');
+  ok((await j('POST', '/api/v1/shares', { id: f.id, maxDownloads: 1.5 })).status === 400, '非整数上限 400');
+  const plain = (await j('POST', '/api/v1/shares', { id: f.id })).body;
+  const r2 = await fetch(`${plain.url}?raw=1`);
+  if (r2.headers.get('X-D1-Rows')) meter.push(['分享下载 (未设上限)', r2.headers.get('X-D1-Rows')]);
+  ok(r2.status === 200, '未设上限的分享照常');
+}
+
+if (sect('stars')) {
+  const D = `${P}/stars`;
+  const a = await put(D, 'a.txt', 'a');
+  const d = (await j('POST', '/api/v1/fs/mkdir', { path: `${D}/sub` })).body.node;
+  let r = await j('POST', '/api/v1/fs/star', { id: a.id, on: true }, {}, 'fs/star 加星');
+  ok(r.status === 200 && r.body.starred, '加星');
+  await j('POST', '/api/v1/fs/star', { path: `${D}/sub`, on: true });
+  await j('POST', '/api/v1/fs/star', { id: a.id, on: true });
+  r = await j('GET', '/api/v1/fs/stars', undefined, {}, 'fs/stars 列表');
+  const mine = r.body.items.filter((x) => x.path.startsWith(D));
+  ok(mine.length === 2 && mine[0].id === d.id && mine[1].path === `${D}/a.txt` && mine[0].starredAt > 0, '收藏列表: 最新在前, 带路径, 重复加星不重复');
+  // 受限令牌各自收藏, 看不到管理员的
+  const t = (await j('POST', '/api/v1/admin/tokens', { name: 'e2e22-star', scopes: ['read'], rootPath: D })).body.token;
+  const T = { Authorization: `Bearer ${t}` };
+  ok((await j('GET', '/api/v1/fs/stars', undefined, T)).body.items.length === 0, '别的令牌看不到我的收藏');
+  ok((await j('POST', '/api/v1/fs/star', { path: '/a.txt', on: true }, T)).status === 200 && (await j('GET', '/api/v1/fs/stars', undefined, T)).body.items.length === 1, '受限令牌收藏自己根下的文件');
+  // 删除后不列, 取消收藏
+  await j('POST', '/api/v1/fs/delete', { id: d.id });
+  ok(!(await j('GET', '/api/v1/fs/stars')).body.items.some((x) => x.id === d.id), '删除的不再列出');
+  await j('POST', '/api/v1/fs/star', { id: a.id, on: false });
+  ok(!(await j('GET', '/api/v1/fs/stars')).body.items.some((x) => x.id === a.id), '取消收藏');
+}
+
 if (sect('fetch')) {
   const D = `${P}/fetch`;
   // 小文件: 远程地址用本服务自己的直链, 不依赖外网

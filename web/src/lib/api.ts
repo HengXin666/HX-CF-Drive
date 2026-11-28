@@ -100,13 +100,16 @@ export const fs = {
     onProgress?.(receipts.length, r.chunkCount);
     return api<{ node: Node; url: string }>('POST', '/uploads/commit', { ticket: r.ticket, receipts });
   },
+  /** 收藏 (#22): 按令牌各自收藏 */
+  stars: () => api<{ items: (Node & { path: string; starredAt: number })[] }>('GET', '/fs/stars'),
+  star: (id: string, on: boolean) => api<{ ok: true; starred: boolean }>('POST', '/fs/star', { id, on }),
   /** 批量签直链 (每次最多 200 个), 不是文件或无权访问的 id 进 missing */
   links: (ids: string[], expiresIn = 0) => api<{ items: { id: string; name: string; mime: string | null; url: string }[]; missing: string[] }>('POST', '/fs/links', { ids, expiresIn }),
 };
 
-export interface ShareRow { id: string; node_id: string; name: string; expires_at: number | null; created_at: number; has_password: number; disabled?: number; remark?: string | null }
+export interface ShareRow { id: string; node_id: string; name: string; expires_at: number | null; created_at: number; has_password: number; disabled?: number; remark?: string | null; max_downloads?: number | null; downloads?: number }
 /** 编辑分享: 只传要改的字段。password: null 去掉密码; expiresIn: 秒, null 为永久 */
-export interface SharePatch { password?: string | null; expiresIn?: number | null; disabled?: boolean; remark?: string | null }
+export interface SharePatch { password?: string | null; expiresIn?: number | null; disabled?: boolean; remark?: string | null; maxDownloads?: number | null; resetDownloads?: boolean }
 export const shares = {
   list: () => api<{ items: ShareRow[] }>('GET', '/shares'),
   create: (id: string, password?: string, expiresIn?: number) => api<{ id: string; url: string }>('POST', '/shares', { id, password, expiresIn }),

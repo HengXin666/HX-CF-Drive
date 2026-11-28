@@ -42,13 +42,18 @@ const SHARE_LOCK_MS = 15 * 60_000;
 // 分享页输对密码后发的 Cookie: 只对这个分享的路径有效, 1 天; 值是 HMAC, 改了密码或撤销分享即失效
 const SHARE_COOKIE_SEC = 86_400;
 
-interface ShareRow { id: string; node_id: string; password_hash: string | null; expires_at: number | null; fails: number; locked_until: number | null; disabled: number }
+interface ShareRow {
+  id: string; node_id: string; password_hash: string | null; expires_at: number | null; fails: number; locked_until: number | null; disabled: number;
+  /** 下载次数上限 (#22), null 不限也不计数 */
+  max_downloads: number | null; downloads: number;
+}
 
 async function loadShare(env: Env, id: string): Promise<ShareRow> {
   const share = await env.DB.prepare('SELECT * FROM shares WHERE id = ?').bind(id).first<ShareRow>();
   if (!share || (share.expires_at && share.expires_at < Date.now())) throw new HttpError(404, 'share not found or expired');
   // 停用的分享 (#22) 和撤销一样打不开, 但保留记录, 可以再启用
   if (share.disabled) throw new HttpError(410, 'share disabled');
+  if (share.max_downloads && share.downloads >= share.max_downloads) throw new HttpError(410, 'download limit reached');
   return share;
 }
 
@@ -90,6 +95,7 @@ function errorAsPage(e: HttpError, id: string, path: string, pwGiven: boolean): 
   if (e.status === 401) return page(passwordPage(id, path, { wrong: pwGiven }), 401);
   if (e.status === 429) return page(passwordPage(id, path, { locked: Number(e.headers?.['Retry-After'] ?? 60) }), 429, e.headers);
   if (e.status === 404) return page(errorPage('分享不存在', '链接可能已过期, 被撤销, 或文件已被删除。'), 404);
+  if (e.status === 410 && /limit/.test(e.message)) return page(errorPage('下载次数已用完', '这个分享设置了下载次数上限, 已经用完。'), 410);
   if (e.status === 410) return page(errorPage('分享已停用', '分享者暂时停用了这个链接。'), 410);
   return page(errorPage('打不开这个分享', e.message), e.status);
 }
@@ -144,6 +150,11 @@ async function openShare(c: Context<AppEnv>, html: boolean): Promise<Response> {
     return c.json({ node: publicNode(node), children: children.map(publicNode) });
   }
   if (html) return page(filePage(share.id, node, sub));
+  // 下载次数上限 (#22): 只有设了上限的分享才计数, 一次下载写 1 行。HEAD 和续传 (Range 不从 0 开始) 不计数, 播放器拖动不会把次数用光
+  if (share.max_downloads && c.req.method === 'GET' && !/^bytes=(?!0-)/.test(c.req.header('Range') ?? '')) {
+    const r = await c.env.DB.prepare('UPDATE shares SET downloads = downloads + 1 WHERE id = ? AND downloads < max_downloads').bind(share.id).run();
+    if (!r.meta.changes) throw new HttpError(410, 'download limit reached');
+  }
   return serveNode(c.env, node, c.req.raw, {
     download: c.req.query('download') === '1',
     waitUntil: (p) => c.executionCtx.waitUntil(p),

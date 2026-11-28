@@ -12,6 +12,8 @@ export function ShareEditDialog({ share, onClose, onSaved }: { share: ShareRow |
   const [pw, setPw] = useState('');
   const [expMode, setExpMode] = useState<'keep' | 'never' | 'days'>('keep');
   const [days, setDays] = useState('7');
+  const [maxDl, setMaxDl] = useState('');
+  const [reset, setReset] = useState(false);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     if (!share) return;
@@ -21,6 +23,8 @@ export function ShareEditDialog({ share, onClose, onSaved }: { share: ShareRow |
     setPw('');
     setExpMode('keep');
     setDays('7');
+    setMaxDl(share.max_downloads ? String(share.max_downloads) : '');
+    setReset(false);
   }, [share]);
 
   const save = async () => {
@@ -38,6 +42,10 @@ export function ShareEditDialog({ share, onClose, onSaved }: { share: ShareRow |
       if (!(d > 0)) { toast.error('有效天数要大于 0'); return; }
       patch.expiresIn = Math.round(d * 86400);
     }
+    const md = maxDl.trim() ? Number(maxDl) : null;
+    if (md !== null && !(Number.isInteger(md) && md >= 1)) { toast.error('下载次数上限要是正整数, 留空为不限'); return; }
+    if (md !== (share.max_downloads ?? null)) patch.maxDownloads = md;
+    if (reset) patch.resetDownloads = true;
     if (!Object.keys(patch).length) { onClose(); return; }
     setBusy(true);
     try {
@@ -79,6 +87,12 @@ export function ShareEditDialog({ share, onClose, onSaved }: { share: ShareRow |
               <ToggleGroupItem value="days">从现在起</ToggleGroupItem>
             </ToggleGroup>
           </Field>
+          <Field label="下载次数上限" description={`留空为不限 (不计数)。HEAD 和断点续传不计数${share?.max_downloads ? `; 已下载 ${share.downloads ?? 0} 次` : ''}`}>
+            <Input type="number" min={1} step={1} placeholder="不限" value={maxDl} onChange={(e) => setMaxDl(e.target.value)} />
+          </Field>
+          {!!share?.downloads && (
+            <Field label="清零已下载次数" orientation="horizontal"><Switch checked={reset} onCheckedChange={setReset} /></Field>
+          )}
           {expMode === 'days' && <Field label="有效天数"><Input type="number" min={0} step="any" value={days} onChange={(e) => setDays(e.target.value)} /></Field>}
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={onClose}>取消</Button>

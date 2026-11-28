@@ -1,5 +1,5 @@
 // 文件内容读取 (支持 Range), 签名直链 /f/ 和分享链接 /s/
-import { type DNode, getData, now, state } from './db';
+import { type DNode, getData, now, save, state } from './db';
 import { children, getNode, HttpError, publicNode, resolvePath } from './tree';
 
 export const BASE = import.meta.env.BASE_URL;
@@ -66,6 +66,7 @@ export async function serveShare(rest: string, url: URL, req: Request): Promise<
   const sh = state().shares.find((s) => s.id === rest.split('/')[0]);
   if (!sh || (sh.expiresAt && sh.expiresAt < now())) throw new HttpError(404, 'share not found or expired');
   if (sh.disabled) throw new HttpError(410, 'share disabled');
+  if (sh.maxDownloads && (sh.downloads ?? 0) >= sh.maxDownloads) throw new HttpError(410, 'download limit reached');
   if (sh.password && (url.searchParams.get('p') ?? req.headers.get('X-Share-Password') ?? '') !== sh.password) {
     throw new HttpError(401, 'password required');
   }
@@ -75,5 +76,7 @@ export async function serveShare(rest: string, url: URL, req: Request): Promise<
   const n = sub ? resolvePath(sub, root.id) : root;
   if (!n) throw new HttpError(404, 'not found');
   if (n.kind === 'dir') return json(200, { node: publicNode(n), children: children(n.id).map(publicNode) });
+  // 下载次数上限 (#22): 同服务端, HEAD 和续传不计数
+  if (sh.maxDownloads && req.method === 'GET' && !/^bytes=(?!0-)/.test(req.headers.get('Range') ?? '')) { sh.downloads = (sh.downloads ?? 0) + 1; void save(); }
   return serveNode(n, req, url.searchParams.get('download') === '1');
 }

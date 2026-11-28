@@ -437,16 +437,23 @@ function renameRandom(name: string): string {
 // ---------------- 分享 ----------------
 
 api.post('/shares', requireScope('read'), async (c) => {
-  const b = await c.req.json<{ id?: string; path?: string; password?: string; expiresIn?: number; remark?: string }>();
+  const b = await c.req.json<{ id?: string; path?: string; password?: string; expiresIn?: number; remark?: string; maxDownloads?: number | null }>();
   const node = await locate(c, b.id, b.path);
   const id = newId(10);
-  await c.env.DB.prepare('INSERT INTO shares (id, node_id, password_hash, expires_at, created_at, token_id, remark) VALUES (?, ?, ?, ?, ?, ?, ?)')
-    .bind(id, node.id, b.password ? await sha256Hex(`${id}:${b.password}`): null, b.expiresIn ? now() + b.expiresIn * 1000 : null, now(), c.get('principal').id, remarkOf(b.remark))
+  await c.env.DB.prepare('INSERT INTO shares (id, node_id, password_hash, expires_at, created_at, token_id, remark, max_downloads) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    .bind(id, node.id, b.password ? await sha256Hex(`${id}:${b.password}`): null, b.expiresIn ? now() + b.expiresIn * 1000 : null, now(), c.get('principal').id, remarkOf(b.remark), maxDl(b.maxDownloads))
     .run();
   return c.json({ id, url: `${publicOrigin(c.env, c.req.url)}/s/${id}` });
 });
 
-const SHARE_COLS = 's.id, s.node_id, s.expires_at, s.created_at, s.disabled, s.remark, n.name, (s.password_hash IS NOT NULL) AS has_password';
+const SHARE_COLS = 's.id, s.node_id, s.expires_at, s.created_at, s.disabled, s.remark, s.max_downloads, s.downloads, n.name, (s.password_hash IS NOT NULL) AS has_password';
+/** 下载次数上限 (#22): 1 ~ 100 万, 不传 / null / 0 为不限 (不计数) */
+function maxDl(v: unknown): number | null {
+  if (v === undefined || v === null || v === '' || Number(v) === 0) return null;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 1 || n > 1_000_000) throw new HttpError(400, 'maxDownloads must be 1..1000000');
+  return n;
+}
 const remarkOf = (r: unknown) => (typeof r === 'string' && r.trim() ? r.trim().slice(0, 200) : null);
 
 /** 分享列表按令牌范围隔离: 受限令牌只看得到自己根目录下的分享 (分享 id 就是公开访问凭证, 不能泄露给别的令牌) */
@@ -477,7 +484,7 @@ api.patch('/shares/:id', requireScope('write'), async (c) => {
   const s = await c.env.DB.prepare('SELECT node_id FROM shares WHERE id = ?').bind(id).first<{ node_id: string }>();
   if (!s) throw new HttpError(404, 'share not found');
   await assertAccess(c.env, c.get('principal'), s.node_id);
-  const b = await c.req.json<{ password?: string | null; expiresIn?: number | null; disabled?: boolean; remark?: string | null }>();
+  const b = await c.req.json<{ password?: string | null; expiresIn?: number | null; disabled?: boolean; remark?: string | null; maxDownloads?: number | null; resetDownloads?: boolean }>();
   const sets: string[] = [];
   const args: unknown[] = [];
   if (b.password !== undefined) {
@@ -492,6 +499,8 @@ api.patch('/shares/:id', requireScope('write'), async (c) => {
   }
   if (b.disabled !== undefined) { sets.push('disabled = ?'); args.push(b.disabled ? 1 : 0); }
   if (b.remark !== undefined) { sets.push('remark = ?'); args.push(remarkOf(b.remark)); }
+  if (b.maxDownloads !== undefined) { sets.push('max_downloads = ?'); args.push(maxDl(b.maxDownloads)); }
+  if (b.resetDownloads) sets.push('downloads = 0');
   if (!sets.length) throw new HttpError(400, 'nothing to update');
   await c.env.DB.prepare(`UPDATE shares SET ${sets.join(', ')} WHERE id = ?`).bind(...args, id).run();
   const row = await c.env.DB.prepare(`SELECT ${SHARE_COLS} FROM shares s JOIN nodes n ON n.id = s.node_id WHERE s.id = ?`).bind(id).first();
@@ -504,6 +513,35 @@ api.delete('/shares/:id', requireScope('write'), async (c) => {
   await assertAccess(c.env, c.get('principal'), s.node_id);
   await c.env.DB.prepare('DELETE FROM shares WHERE id = ?').bind(c.req.param('id')).run();
   return c.json({ ok: true });
+});
+
+// ---------------- 收藏 (#22) ----------------
+
+/** 收藏列表: 按令牌各自收藏, 最新的在前, 最多 500 个。已删除的不列; 带完整路径。2 条查询 (收藏 JOIN 节点 + 路径) */
+api.get('/fs/stars', requireScope('read'), async (c) => {
+  const p = c.get('principal');
+  const rows = (await c.env.DB.prepare(
+    `SELECT n.*, s.created_at AS starred_at FROM stars s JOIN nodes n ON n.id = s.node_id
+     WHERE s.owner = ? AND n.deleted_at IS NULL ORDER BY s.created_at DESC LIMIT 500`,
+  ).bind(p.id).all<NodeRow & { starred_at: number }>()).results;
+  const paths = await pathsOf(c.env, rows);
+  const items = rows.flatMap((n) => {
+    const e = paths.get(n.id);
+    // 祖先已删除, 或 (受限令牌) 已被移出自己的根目录: 不列
+    if (!e || e.dead || (p.rootId !== 'root' && !e.ancestors.has(p.rootId))) return [];
+    return [{ ...publicNode(n), path: e.path, starredAt: n.starred_at }];
+  });
+  return c.json({ items });
+});
+
+/** 加星 / 取消: { id | path, on: boolean }。1 行写 */
+api.post('/fs/star', requireScope('read'), async (c) => {
+  const b = await c.req.json<{ id?: string; path?: string; on?: boolean }>();
+  const node = await locate(c, b.id, b.path);
+  const p = c.get('principal');
+  if (b.on === false) await c.env.DB.prepare('DELETE FROM stars WHERE owner = ? AND node_id = ?').bind(p.id, node.id).run();
+  else await c.env.DB.prepare('INSERT OR IGNORE INTO stars (owner, node_id, created_at) VALUES (?, ?, ?)').bind(p.id, node.id, now()).run();
+  return c.json({ ok: true, starred: b.on !== false });
 });
 
 // ---------------- 管理 ----------------

@@ -13,9 +13,10 @@ const Admin = lazy(() => import('./pages/Admin').then((m) => ({ default: m.Admin
 const ApiDocs = lazy(() => import('./pages/ApiDocs').then((m) => ({ default: m.ApiDocs })));
 const Shares = lazy(() => import('./pages/Shares').then((m) => ({ default: m.Shares })));
 const Trash = lazy(() => import('./pages/Trash').then((m) => ({ default: m.Trash })));
+const Stars = lazy(() => import('./pages/Stars').then((m) => ({ default: m.Stars })));
 /** 鼠标移到侧栏菜单上时预取对应页面, 点下去基本不用等 */
 const PREFETCH: Record<string, () => Promise<unknown>> = {
-  admin: () => import('./pages/Admin'), docs: () => import('./pages/ApiDocs'), shares: () => import('./pages/Shares'), trash: () => import('./pages/Trash'),
+  admin: () => import('./pages/Admin'), docs: () => import('./pages/ApiDocs'), shares: () => import('./pages/Shares'), trash: () => import('./pages/Trash'), stars: () => import('./pages/Stars'),
 };
 
 const Loading = () => (
@@ -65,6 +66,7 @@ export function App() {
   const isAdmin = !!scopes?.includes('admin');
   const items: NavItem[] = [
     { id: 'files', label: '文件', hint: 'files', icon: 'files', group: '网盘' },
+    { id: 'stars', label: '收藏', hint: 'stars', icon: 'star', group: '网盘' },
     { id: 'shares', label: '分享', hint: 'shares', icon: 'share', group: '网盘' },
     { id: 'trash', label: '回收站', hint: 'trash', icon: 'trash', group: '网盘' },
     ...(isAdmin ? [{ id: 'admin', label: '后台', hint: 'admin', icon: 'admin', group: '管理' } as NavItem] : []),
@@ -94,7 +96,7 @@ export function App() {
       )}
     >
       <Suspense fallback={<Loading />}>
-        {page === 'trash' ? <Trash /> : page === 'shares' ? <Shares /> : page === 'docs' ? <ApiDocs />
+        {page === 'trash' ? <Trash /> : page === 'stars' ? <Stars go={go} /> : page === 'shares' ? <Shares /> : page === 'docs' ? <ApiDocs />
           : page === 'admin' && scopes === null ? <Loading /> // 权限还没回来: 先等, 免得先挂文件页白拉一次目录
           : page === 'admin' && isAdmin ? <Admin onStats={setStats} /> : <Files path={filePath} go={go} isAdmin={isAdmin} />}
       </Suspense>

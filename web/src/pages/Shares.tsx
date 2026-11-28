@@ -51,9 +51,12 @@ export function Shares() {
       ? <Badge variant="outline" dot="muted">已停用</Badge>
       : s.expires_at && s.expires_at < Date.now()
         ? <Badge variant="outline" dot="destructive">已过期</Badge>
+        : s.max_downloads && (s.downloads ?? 0) >= s.max_downloads
+          ? <Badge variant="outline" dot="destructive">次数用完</Badge>
         : s.has_password
           ? <Badge variant="outline" dot="warning">密码</Badge>
           : <Badge variant="outline" dot="success">公开</Badge>) },
+    { key: 'dl', header: '下载', hideOnMobile: true, render: (s) => <span className="whitespace-nowrap tabular-nums text-muted-foreground">{s.max_downloads ? `${s.downloads ?? 0} / ${s.max_downloads}` : '不限'}</span> },
     { key: 'exp', header: '过期', hideOnMobile: true, sort: (s) => s.expires_at ?? Number.MAX_SAFE_INTEGER,
       render: (s) => <span className="whitespace-nowrap tabular-nums text-muted-foreground">{s.expires_at ? fmtTime(s.expires_at) : '永久'}</span> },
     { key: 'at', header: '创建', hideOnMobile: true, sort: (s) => s.created_at,

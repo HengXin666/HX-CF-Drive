@@ -131,6 +131,20 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
   const [tokens, setTokens] = useState<TokenRow[]>([]);
   useEffect(() => { if (isAdmin) admin.tokens().then((r) => setTokens(r.items), () => setTokens([])); }, [isAdmin]);
 
+  // 收藏 (#22): 打开文件页时取一次本令牌的收藏 id, 列表里显示星标
+  const [stars, setStars] = useState<Set<string>>(() => new Set());
+  useEffect(() => { fs.stars().then((r) => setStars(new Set(r.items.map((x) => x.id))), () => {}); }, []);
+  const toggleStar = async (n: Node) => {
+    const on = !stars.has(n.id);
+    try {
+      await fs.star(n.id, on);
+      setStars((s) => { const x = new Set(s); if (on) x.add(n.id); else x.delete(n.id); return x; });
+      toast.success(on ? `已收藏 ${n.name}` : `已取消收藏 ${n.name}`);
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  };
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -347,8 +361,8 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
 
   // 列定义 memo 化 (#23): 只在图片开关或搜索状态变化时重建, 表格 (TanStack 列定义) 不再每次 render 都重算;
   // 列里用到的操作每次 render 更新到 ref, 点下去总是最新的闭包
-  const act$ = useRef({ save, share, remove, full, changed, setLinking, expire });
-  act$.current = { save, share, remove, full, changed, setLinking, expire };
+  const act$ = useRef({ save, share, remove, full, changed, setLinking, expire, toggleStar, stars });
+  act$.current = { save, share, remove, full, changed, setLinking, expire, toggleStar, stars };
   const isSearch = !!searching;
   const columns = useMemo<Column<Node>[]>(() => [
     { key: 'name', header: '名称', sort: (n) => (n.kind === 'dir' ? '0' : '1') + n.name.toLowerCase(), render: (n) => {
@@ -363,6 +377,7 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
               {n.kind === 'dir' ? '' : `${fmtSize(n.size)} · `}{fmtTime(n.updatedAt)}
             </span>
           </span>
+          {stars.has(n.id) && <span role="img" aria-label="已收藏" title="已收藏" className="inline-flex shrink-0"><Icon name="star" className="size-3.5 fill-current text-amber-400" /></span>}
           {n.expiresAt && <Expiry at={n.expiresAt} />}
           {isSearch && n.path && <span className="truncate font-mono text-xs text-muted-foreground">{parentOf(n.path)}</span>}
         </span>
@@ -396,13 +411,14 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
             })}><Icon name="rename" /> 重命名</DropdownMenuItem>
             <DropdownMenuItem onSelect={() => setMoving([act$.current.full(n)])}><Icon name="move" /> 移动到…</DropdownMenuItem>
             <DropdownMenuItem onSelect={() => act$.current.expire(n)}><Icon name="clock" /> 设置到期…</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void act$.current.toggleStar(n)}><Icon name={act$.current.stars.has(n.id) ? 'starOff' : 'star'} /> {act$.current.stars.has(n.id) ? '取消收藏' : '收藏'}</DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem variant="destructive" onSelect={() => void act$.current.remove([act$.current.full(n)])}><Icon name="trash" /> 删除</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
     ) },
-  ], [img, isSearch]);
+  ], [img, isSearch, stars]);
 
   const here = path.split('/').filter(Boolean).pop();
   // 搜索框默认只在当前目录已加载的列表里筛选 (#23, 0 请求); 全盘搜索要点按钮, 走 /fs/search (LIKE 扫全库)
@@ -585,6 +601,7 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
             <DropdownMenuItem onSelect={() => rename(n)}><Icon name="rename" /> 重命名</DropdownMenuItem>
             <DropdownMenuItem onSelect={() => setMoving([full(n)])}><Icon name="move" /> 移动到…</DropdownMenuItem>
             <DropdownMenuItem onSelect={() => expire(n)}><Icon name="clock" /> 设置到期…</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void toggleStar(n)}><Icon name={stars.has(n.id) ? 'starOff' : 'star'} /> {stars.has(n.id) ? '取消收藏' : '收藏'}</DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem variant="destructive" onSelect={() => void remove([full(n)])}><Icon name="trash" /> 删除</DropdownMenuItem>
           </>

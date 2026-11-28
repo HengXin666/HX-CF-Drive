@@ -31,6 +31,8 @@ export const GROUPS: Group[] = [
       { method: 'POST', path: '/api/v1/fs/link', scope: 'read', desc: '签名直链, expiresIn 秒, 0 为永久', body: '{"path":"/a.png","expiresIn":0}', resp: '{"url":"https://.../f/<id>/a.png?e=0&s=..."}' },
       { method: 'POST', path: '/api/v1/fs/fetch', scope: 'write', desc: 'URL 远程上传: 服务端拉远程内容流式写 TG。≤ 3 片 (≈ 57 MiB) 一次完成; 更大的返回 ticket + receipts + next, 用 /uploads/fetch 续拉 (远程须支持 Range), 最后 /uploads/commit', body: '{"url":"https://example.com/a.zip","path":"/dl","name":"a.zip"}', resp: '{"done":true,"node":Node,"url":"..."} 或 {"done":false,"ticket":"...","chunkCount":9,"receipts":[...],"next":3}' },
       { method: 'POST', path: '/api/v1/uploads/fetch', scope: 'write', desc: 'URL 上传续拉: 拉 [from, from+3) 片, 返回回执; next 为 null 表示拉完。D1 零读写', body: '{"ticket":"...","url":"https://example.com/a.zip","from":3}', resp: '{"receipts":[...],"next":6}' },
+      { method: 'GET', path: '/api/v1/fs/stars', scope: 'read', desc: '收藏列表: 每个令牌各自收藏, 最新在前, 带 path 和 starredAt, 已删除的不列。2 次查询', resp: '{"items":[Node & {path, starredAt}]}' },
+      { method: 'POST', path: '/api/v1/fs/star', scope: 'read', desc: '加星 / 取消收藏 (on: false)。1 行写', body: '{"path":"/photos","on":true}', resp: '{"ok":true,"starred":true}' },
       { method: 'POST', path: '/api/v1/fs/expire', scope: 'write', desc: '到期自动删除 (TTL): expiresIn 秒 (60 ~ 10 年), null 取消。到期后访问返回 410, 定时维护移进回收站 (目录连同内容)。上传时也可以直接带: /upload?expiresIn=, /uploads 的 expiresIn', body: '{"path":"/tmp/a.log","expiresIn":86400}', resp: '{"node":Node}' },
       { method: 'POST', path: '/api/v1/fs/links', scope: 'read', desc: '批量签直链 (最多 200 个, 按请求顺序返回), 不是文件或无权访问的 id 放进 missing。2 次查询', body: '{"ids":["<id1>","<id2>"],"expiresIn":0}', resp: '{"items":[{"id":"...","name":"a.png","mime":"image/png","url":"..."}],"missing":[]}' },
       { method: 'GET', path: '/api/v1/files/<id>/content?v=<version>', scope: 'read', desc: '读取内容, 支持 Range 与 If-None-Match (弱 ETag / 多值); ?download=1 以附件下载。v 填节点的 version (列表里有), 仍是当前版本时响应带 immutable, 浏览器可长期缓存' },
@@ -54,7 +56,7 @@ export const GROUPS: Group[] = [
     items: [
       { method: 'POST', path: '/api/v1/shares', scope: 'read', desc: '创建分享, 密码, 有效期, 备注可选', body: '{"path":"/a.zip","password":"1234","expiresIn":604800,"remark":"给小明"}', resp: '{"id":"...","url":"https://.../s/<id>"}' },
       { method: 'GET', path: '/api/v1/shares', scope: 'read', desc: '分享列表 (含 has_password, expires_at, disabled, remark)' },
-      { method: 'PATCH', path: '/api/v1/shares/<id>', scope: 'write', desc: '编辑分享, 只改传了的字段: password (null 去掉), expiresIn (秒, 从现在起; null 为永久), disabled (停用后访问返回 410), remark。改密码后旧的密码 Cookie 失效', body: '{"disabled":false,"password":"new","expiresIn":259200,"remark":"给同事"}', resp: '{"share":{...}}' },
+      { method: 'PATCH', path: '/api/v1/shares/<id>', scope: 'write', desc: '编辑分享, 只改传了的字段: password (null 去掉), expiresIn (秒, 从现在起; null 为永久), disabled (停用后访问返回 410), remark, maxDownloads (下载次数上限, null 不限也不计数; 用完 410), resetDownloads (清零)。改密码后旧的密码 Cookie 失效', body: '{"disabled":false,"password":"new","expiresIn":259200,"remark":"给同事"}', resp: '{"share":{...}}' },
       { method: 'DELETE', path: '/api/v1/shares/<id>', scope: 'write', desc: '撤销分享' },
     ],
   },
