@@ -15,6 +15,10 @@ export {
 export { Field } from '@hx/ui/ui/field';
 export { Input } from '@hx/ui/ui/input';
 export { Progress } from '@hx/ui/ui/progress';
+export { Slider } from '@hx/ui/ui/slider';
+export { Switch } from '@hx/ui/ui/switch';
+export { Textarea } from '@hx/ui/ui/textarea';
+export { ToggleGroup, ToggleGroupItem } from '@hx/ui/ui/toggle-group';
 export { Toaster } from '@hx/ui/ui/sonner';
 export { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@hx/ui/ui/tooltip';
 export { toast } from 'sonner';

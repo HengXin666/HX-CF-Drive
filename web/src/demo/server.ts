@@ -94,6 +94,21 @@ on('POST', '/fs/link', 'read', async (c) => {
   return json(200, { url: fileLink(n, Number(b.expiresIn) || 0) });
 });
 
+// 批量签直链 (#22), 同 /fs/links
+on('POST', '/fs/links', 'read', async (c) => {
+  const b = await c.body();
+  const ids = [...new Set((Array.isArray(b.ids) ? b.ids : []).map(String))];
+  if (ids.length > 200) throw new HttpError(413, 'too many ids (max 200)');
+  const items = [];
+  const missing: string[] = [];
+  for (const id of ids) {
+    const n = getNode(id);
+    if (!n || n.kind !== 'file') { missing.push(id); continue; }
+    items.push({ id, name: n.name, mime: n.mime, url: fileLink(n, Number(b.expiresIn) || 0) });
+  }
+  return json(200, { items, missing });
+});
+
 on('(GET|HEAD)', '/files/([^/]+)/content', 'read', (c, m) => {
   const n = getNode(decodeURIComponent(m[1]));
   if (!n) throw new HttpError(404, 'not found');

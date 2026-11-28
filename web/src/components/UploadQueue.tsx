@@ -2,11 +2,13 @@
 // 状态放在模块级 store 里 (useSyncExternalStore), 只有队列面板订阅: 进度事件不会让文件页整表重渲染 (#23)。
 // 进度刷新节流到每秒 4 次; 每个文件传完把服务端返回的节点交给文件页插进列表, 不再重新列目录。
 import { Button, Progress } from '../ui';
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { lazy, Suspense, useEffect, useState, useSyncExternalStore } from 'react';
 import { ApiError, fmtSize, type Node } from '../lib/api';
 import { type Progress as P, uploadFile, type UploadOpts } from '../lib/transfer';
 
-export interface Item { id: number; file: File; dir: string; p: P; opts?: UploadOpts; error?: string; conflict?: boolean }
+export interface Item { id: number; file: File; dir: string; p: P; opts?: UploadOpts; error?: string; conflict?: boolean; node?: Node }
+
+const LinkDialog = lazy(() => import('./LinkDialog').then((m) => ({ default: m.LinkDialog })));
 
 // 同名时 "保留两者": a.png -> a (1).png
 const copyName = (n: string) => n.replace(/(\.[^.]*)?$/, (ext) => ` (${Date.now() % 1000})${ext}`);
@@ -49,7 +51,7 @@ function pump() {
       patch(cur.id, { p }, p.phase !== phase);
       phase = p.phase;
     }, cur.opts).then((node) => {
-      if (node) handlers.onUploaded?.(node, cur.dir);
+      if (node) { patch(cur.id, { node }); handlers.onUploaded?.(node, cur.dir); }
     }, (e) => {
       const conflict = e instanceof ApiError && e.status === 409;
       patch(cur.id, { p: { phase: 'error', ratio: 0 }, conflict, error: conflict ? '已有同名文件' : (e as Error).message });
@@ -99,6 +101,8 @@ const PHASE: Record<P['phase'], string> = { hash: '计算哈希', upload: '上�
 export function UploadQueue() {
   const list = useSyncExternalStore(subscribe, snapshot);
   const [open, setOpen] = useState(true);
+  const [linking, setLinking] = useState<Node[] | null>(null);
+  const done = list.flatMap((x) => (x.p.phase === 'done' && x.node ? [x.node] : []));
   useEffect(() => { if (list.some((x) => x.p.phase !== 'done')) setOpen(true); }, [list]);
   if (!list.length) return null;
   return (
@@ -106,6 +110,7 @@ export function UploadQueue() {
       <div className="mb-2 flex items-center justify-between text-sm font-medium">
         <span>上传 ({list.filter((x) => x.p.phase === 'done').length}/{list.length})</span>
         <div className="flex gap-1">
+          {done.length > 0 && <Button size="xs" variant="ghost" onClick={() => setLinking(done)}>复制链接</Button>}
           <Button size="xs" variant="ghost" onClick={uploads.clearDone}>清除已完成</Button>
           <Button size="xs" variant="ghost" onClick={() => setOpen(!open)}>{open ? '收起' : '展开'}</Button>
         </div>
@@ -140,6 +145,7 @@ export function UploadQueue() {
           ))}
         </ul>
       )}
+      {linking && <Suspense fallback={null}><LinkDialog nodes={linking} onClose={() => setLinking(null)} /></Suspense>}
     </div>
   );
 }

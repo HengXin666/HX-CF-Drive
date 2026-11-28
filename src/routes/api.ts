@@ -202,6 +202,35 @@ api.post('/fs/link', requireScope('read'), async (c) => {
   return c.json({ url: await linkFor(c, node, b.expiresIn ?? 0) });
 });
 
+/** 一次最多给多少个文件签直链 */
+export const LINKS_MAX = 200;
+
+/**
+ * 批量签直链 (#22, 复制整批链接用): { ids, expiresIn } → { items: [{ id, name, mime, url }] }。
+ * 节点 1 条 IN 查询 + 路径/权限 1 条递归 CTE (pathsOf), 共 2 次查询, 不再每个文件一次 /fs/link。
+ * 不存在, 已删除, 在令牌根外或不是文件的 id 放进 missing。
+ */
+api.post('/fs/links', requireScope('read'), async (c) => {
+  const b = await c.req.json<{ ids?: string[]; expiresIn?: number }>();
+  const ids = [...new Set((b.ids ?? []).filter((x) => typeof x === 'string'))];
+  if (ids.length > LINKS_MAX) throw new HttpError(413, `too many ids (max ${LINKS_MAX})`);
+  const p = c.get('principal');
+  const r = ids.length
+    ? await c.env.DB.prepare('SELECT * FROM nodes WHERE id IN (SELECT value FROM json_each(?)) AND deleted_at IS NULL').bind(JSON.stringify(ids)).all<NodeRow>()
+    : { results: [] as NodeRow[] };
+  const paths = await pathsOf(c.env, r.results);
+  const byId = new Map(r.results.map((n) => [n.id, n]));
+  const items = [];
+  const missing: string[] = [];
+  for (const id of ids) {
+    const n = byId.get(id);
+    const e = n && paths.get(id);
+    if (!n || !e || e.dead || n.kind !== 'file' || (p.rootId !== 'root' && !e.ancestors.has(p.rootId))) { missing.push(id); continue; }
+    items.push({ id, name: n.name, mime: n.mime, url: await linkFor(c, n, b.expiresIn ?? 0) });
+  }
+  return c.json({ items, missing });
+});
+
 /**
  * 分片清单 (只读): 每片的 Bot, TG file_id, 大小。持有对应 Bot 令牌的客户端 (如 AIOA 主人的手机) 可以直接从 TG 并发拉取,
  * 字节不经过 Worker。file_id 只对上传它的 Bot 有效, 没有 Bot 令牌拿到也下不了, 所以和读内容同权限 (read, 只限自己的子树)。

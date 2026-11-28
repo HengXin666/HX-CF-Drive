@@ -19,6 +19,7 @@ import {
 
 // 弹窗按需加载 (#23): 第一次用到时才下载, 之后一直挂着 (保留关闭动画)
 const MoveDialog = lazy(() => import('../components/MoveDialog').then((m) => ({ default: m.MoveDialog })));
+const LinkDialog = lazy(() => import('../components/LinkDialog').then((m) => ({ default: m.LinkDialog })));
 const Preview = lazy(() => import('../components/Preview').then((m) => ({ default: m.Preview })));
 
 const parentOf = (p: string) => p.replace(/\/[^/]+\/?$/, '') || '/';
@@ -78,8 +79,10 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
   const [prompt, setPrompt] = useState<PromptRequest | null>(null);
   const [moving, setMoving] = useState<Item[] | null>(null);
   const [preview, setPreview] = useState<PreviewTarget | null>(null);
+  const [linking, setLinking] = useState<Node[] | null>(null);
   // 弹窗用过一次才挂载 (懒加载的代码到那时才下载)
-  const used = useRef({ move: false, preview: false }).current;
+  const used = useRef({ move: false, preview: false, link: false }).current;
+  if (linking) used.link = true;
   if (moving) used.move = true;
   if (preview) used.preview = true;
   const [drag, setDrag] = useState(false);
@@ -264,8 +267,8 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
 
   // 列定义 memo 化 (#23): 只在图片开关或搜索状态变化时重建, 表格 (TanStack 列定义) 不再每次 render 都重算;
   // 列里用到的操作每次 render 更新到 ref, 点下去总是最新的闭包
-  const act$ = useRef({ save, share, remove, full, changed });
-  act$.current = { save, share, remove, full, changed };
+  const act$ = useRef({ save, share, remove, full, changed, setLinking });
+  act$.current = { save, share, remove, full, changed, setLinking };
   const isSearch = !!searching;
   const columns = useMemo<Column<Node>[]>(() => [
     { key: 'name', header: '名称', sort: (n) => (n.kind === 'dir' ? '0' : '1') + n.name.toLowerCase(), render: (n) => {
@@ -302,8 +305,8 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
             {n.kind === 'file' && <DropdownMenuItem className="sm:hidden" onSelect={() => void act$.current.save(n).catch((e) => toast.error((e as Error).message))}><Icon name="download" /> 下载</DropdownMenuItem>}
             <DropdownMenuItem className="sm:hidden" onSelect={() => act$.current.share(n)}><Icon name="share" /> 分享</DropdownMenuItem>
             {n.kind === 'file' && (
-              <DropdownMenuItem onSelect={() => void fs.link(n.id, 0).then((r) => copy(r.url, '永久直链'), (e) => toast.error((e as Error).message))}>
-                <Icon name="link" /> 复制永久直链
+              <DropdownMenuItem onSelect={() => act$.current.setLinking([n])}>
+                <Icon name="link" /> 复制链接…
               </DropdownMenuItem>
             )}
             <DropdownMenuItem onSelect={() => setPrompt({
@@ -418,6 +421,9 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
           )}
           bulkActions={(sel, clear) => (
             <>
+              {sel.some((n) => n.kind === 'file') && (
+                <Button size="sm" variant="outline" aria-label="复制链接" onClick={() => setLinking(sel)}><Icon name="link" /><span className="hidden sm:inline">复制链接</span></Button>
+              )}
               <Button size="sm" variant="outline" aria-label="移动到" onClick={() => setMoving(sel.map(full))}><Icon name="move" /><span className="hidden sm:inline">移动到…</span></Button>
               <Button size="sm" variant="destructive" aria-label="删除" onClick={() => void remove(sel.map(full), clear)}><Icon name="trash" /><span className="hidden sm:inline">删除</span></Button>
             </>
@@ -434,7 +440,7 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
             <DropdownMenuItem onSelect={() => void open(n).catch(fail)}><Icon name={n.kind === 'dir' ? 'folder' : 'eye'} /> {n.kind === 'dir' ? '打开' : '预览'}</DropdownMenuItem>
             {n.kind === 'file' && <DropdownMenuItem onSelect={() => void save(n).catch(fail)}><Icon name="download" /> 下载</DropdownMenuItem>}
             <DropdownMenuItem onSelect={() => share(n)}><Icon name="share" /> 分享</DropdownMenuItem>
-            {n.kind === 'file' && <DropdownMenuItem onSelect={() => void fs.link(n.id, 0).then((r) => copy(r.url, '永久直链'), fail)}><Icon name="link" /> 复制永久直链</DropdownMenuItem>}
+            {n.kind === 'file' && <DropdownMenuItem onSelect={() => setLinking([n])}><Icon name="link" /> 复制链接…</DropdownMenuItem>}
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={() => rename(n)}><Icon name="rename" /> 重命名</DropdownMenuItem>
             <DropdownMenuItem onSelect={() => setMoving([full(n)])}><Icon name="move" /> 移动到…</DropdownMenuItem>
@@ -465,6 +471,7 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
             onMove={(to) => moveTo(moving ?? [], to)}
           />
         )}
+        {used.link && <LinkDialog nodes={linking} onClose={() => setLinking(null)} />}
         {used.preview && <Preview target={preview} onClose={() => setPreview(null)} onDownload={(n) => void save(n)} />}
       </Suspense>
       <UploadQueue />

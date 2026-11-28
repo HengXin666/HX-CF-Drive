@@ -64,6 +64,8 @@ export const fs = {
   emptyTrash: () => api<PurgeResult>('POST', '/fs/trash/empty'),
   search: (q: string) => api<{ items: Node[] }>('GET', `/fs/search?q=${encodeURIComponent(q)}`),
   link: (id: string, expiresIn = 0) => api<{ url: string }>('POST', '/fs/link', { id, expiresIn }),
+  /** 批量签直链 (每次最多 200 个), 不是文件或无权访问的 id 进 missing */
+  links: (ids: string[], expiresIn = 0) => api<{ items: { id: string; name: string; mime: string | null; url: string }[]; missing: string[] }>('POST', '/fs/links', { ids, expiresIn }),
 };
 
 export interface ShareRow { id: string; node_id: string; name: string; expires_at: number | null; created_at: number; has_password: number }
