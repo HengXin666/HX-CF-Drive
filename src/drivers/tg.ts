@@ -100,7 +100,23 @@ export async function seedBotsFromEnv(env: Env): Promise<number> {
     added++;
   }
   if (added) invalidateBotCache();
+  await fillUsernames(env);
   return added;
+}
+
+/** 从环境变量导入的 Bot 只有 id, 补上用户名 (后台显示用)。每次最多补 10 个, 失败的下次再试 */
+export async function fillUsernames(env: Env): Promise<number> {
+  const missing = (await allBots(env)).filter((b) => !b.username && b.status === 'active').slice(0, 10);
+  let n = 0;
+  for (const b of missing) {
+    try {
+      const me = await tgCall<{ username: string }>(b.token, 'getMe');
+      await env.DB.prepare('UPDATE bots SET username = ? WHERE id = ?').bind(me.username, b.id).run();
+      n++;
+    } catch { /* 下次维护再试 */ }
+  }
+  if (n) invalidateBotCache();
+  return n;
 }
 
 // ---------- 频道 ----------
