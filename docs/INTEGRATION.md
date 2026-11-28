@@ -34,7 +34,7 @@ curl -X POST -H "Authorization: Bearer $ADMIN" -H "Content-Type: application/jso
 | POST | `/api/v1/fs/restore` `{id}` | 恢复 |
 | POST | `/api/v1/fs/purge` `{id}` | 彻底删除 (返回 `more=1` 表示有积压, 由维护接着清) |
 | POST | `/api/v1/fs/trash/empty` | 清空回收站 (受限令牌只清自己根下的) |
-| GET | `/api/v1/fs/search?q=&limit=` | 文件名搜索 |
+| GET | `/api/v1/fs/search?q=&type=&dir=&limit=` | 搜索: 文件名 (q) 和 / 或类型 (type: image, video, audio, doc, archive, other); dir 只搜该目录子树 |
 | POST | `/api/v1/fs/link` `{id, expiresIn}` | 签名直链, expiresIn 秒, 0 为永久 |
 | POST | `/api/v1/fs/batch` `{op, ids \| items, toPath, overwrite}` | 批量 move / copy / delete / restore / rename, 一个 D1 batch; 失败项在 `failed` |
 | POST | `/api/v1/fs/links` `{ids, expiresIn}` | 批量签直链 (≤ 200 个), 无效 id 进 `missing` |
@@ -128,7 +128,7 @@ curl -X PUT --data-binary @part0 "$CHUNK_URL?i=0&ticket=$TICKET"
 | --- | --- | --- |
 | `list` `{path \| id, limit?, after?}` | `GET /fs/list` | read |
 | `stat` `{path \| id}` | `GET /fs/stat` | read |
-| `search` `{q, limit?}` | `GET /fs/search` (每分钟 6 次) | read |
+| `search` `{q?, type?, dir?, limit?}` | `GET /fs/search` (每分钟 6 次) | read |
 | `upload` `{dir?, name, text \| base64, mime?, overwrite?}` | `POST /upload` (≤ 10 MB, 更大的用分片上传) | write |
 | `link` `{path \| id, expiresIn?}` | `POST /fs/link` | read |
 | `share` `{path \| id, password?, expiresIn?, remark?}` | `POST /shares` | read |

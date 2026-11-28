@@ -1,4 +1,5 @@
 // 模拟 REST API v1: 路由与返回结构对齐 src/routes/api.ts, 数据落在浏览器本地
+import { CATEGORIES, categoryOf } from '../../../src/lib/category';
 import { handleMcp } from '../../../src/lib/mcpcore';
 import { type DShare, delData, getData, newId, now, putData, save, sha256Hex, state } from './db';
 import { BASE, fileLink, json, serveNode, servePublicFile, serveShare, shareLink } from './serve';
@@ -110,24 +111,20 @@ on('POST', '/fs/trash/empty', 'write', async () => json(200, await purge(null)))
 
 on('GET', '/fs/search', 'read', ({ url }) => {
   const q = (url.searchParams.get('q') ?? '').trim().toLowerCase();
-  if (!q) throw new HttpError(400, 'q required');
+  const type = url.searchParams.get('type') ?? '';
+  if (type && !(CATEGORIES as readonly string[]).includes(type)) throw new HttpError(400, 'bad type');
+  if (!q && !type) throw new HttpError(400, 'q or type required');
   const limit = Math.min(Number(url.searchParams.get('limit')) || 50, 200);
+  // dir: 只搜这个目录的子树 (#22)
+  const top = url.searchParams.get('dir') ? locate(null, url.searchParams.get('dir')) : getNode(ROOT)!;
   const items = Object.values(state().nodes)
-    .filter((n) => n.id !== ROOT && getNode(n.id) && n.name.toLowerCase().includes(q))
-    .filter((n) => { for (let p = getNode(n.parentId ?? ''); p; p = getNode(p.parentId ?? '')) if (p.id === ROOT) return true; return false; })
+    .filter((n) => n.id !== top.id && getNode(n.id) && (!q || n.name.toLowerCase().includes(q)) && (!type || categoryOf(n.kind, n.mime, n.name) === type))
+    .filter((n) => { for (let p = getNode(n.parentId ?? ''); p; p = getNode(p.parentId ?? '')) if (p.id === top.id) return true; return false; })
     .slice(0, limit)
     .map((n) => ({ ...publicNode(n), path: pathOf(n) }));
   return json(200, { items });
 });
 
-on('POST', '/fs/link', 'read', async (c) => {
-  const b = await c.body();
-  const n = locate(b.id, b.path);
-  if (n.kind !== 'file') throw new HttpError(400, 'not a file');
-  return json(200, { url: fileLink(n, Number(b.expiresIn) || 0) });
-});
-
-// 批量签直链 (#22), 同 /fs/links
 on('POST', '/fs/links', 'read', async (c) => {
   const b = await c.body();
   const ids = [...new Set((Array.isArray(b.ids) ? b.ids : []).map(String))];

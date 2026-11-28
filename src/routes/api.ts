@@ -15,6 +15,7 @@ import { cachedStats, invalidateStats, liveUsage, putStats, STAT_KEYS, usageFrom
 import { ensureParts, IMMUTABLE, loadBlob, serveNode } from '../services/serve';
 import { commitUpload, foldReceipts, initUpload, openTicket, openTicketBare, putChunk, uploadStream } from '../services/upload';
 import { type BatchReq, runBatch } from '../services/batch';
+import { type Category, CATEGORIES, categorySql } from '../lib/category';
 import { trash } from './trash';
 
 export const api = new Hono<AppEnv>();
@@ -187,20 +188,33 @@ function searchAllowed(who: string, perMin: number): boolean {
   return true;
 }
 
+/**
+ * 搜索 (#22 起): q 文件名模糊匹配, type 按类型 (image / video / audio / doc / archive / other), 至少给一个。
+ * dir / dirId: 只在这个目录的子树里搜 (读行 ≈ 子树大小, 比全表 LIKE 便宜); 受限令牌不给时就是它的根目录。
+ */
 api.get('/fs/search', requireScope('read'), async (c) => {
   if (!searchAllowed(c.get('principal').id, num(c.env.SEARCH_PER_MIN, 6))) throw new HttpError(429, 'search rate limited', { 'Retry-After': '10' });
   const q = (c.req.query('q') ?? '').trim();
-  if (q.length < 1) throw new HttpError(400, 'q required');
+  const type = c.req.query('type') ?? '';
+  if (type && !(CATEGORIES as readonly string[]).includes(type)) throw new HttpError(400, 'bad type');
+  if (q.length < 1 && !type) throw new HttpError(400, 'q or type required');
   const limit = Math.min(num(c.req.query('limit'), 50), 200);
-  const like = `%${q.replace(/[%_\\]/g, (m) => '\\' + m)}%`;
-  // 受限令牌只在自己的子树里搜: 先全表 LIMIT 再过滤会被别人的文件挤掉, 一条结果都拿不到
-  const r = c.get('principal').rootId === 'root'
-    ? await c.env.DB.prepare("SELECT * FROM nodes WHERE deleted_at IS NULL AND name LIKE ? ESCAPE '\\' LIMIT ?").bind(like, limit).all<NodeRow>()
+  const where: string[] = ['n.deleted_at IS NULL'];
+  const args: unknown[] = [];
+  if (q) { where.push("n.name LIKE ? ESCAPE '\\'"); args.push(`%${q.replace(/[%_\\]/g, (m) => '\\' + m)}%`); }
+  if (type) { const [w, a] = categorySql(type as Category); where.push(w); args.push(...a); }
+  const dirQ = c.req.query('dirId') || c.req.query('dir');
+  const dir = dirQ ? await locate(c, c.req.query('dirId'), c.req.query('dir')) : null;
+  if (dir && dir.kind !== 'dir') throw new HttpError(400, 'not a dir');
+  const rootId = dir?.id ?? c.get('principal').rootId;
+  // 受限令牌或限定目录时只扫子树: 先全表 LIMIT 再过滤会被别人的文件挤掉, 一条结果都拿不到
+  const r = rootId === 'root'
+    ? await c.env.DB.prepare(`SELECT n.* FROM nodes n WHERE ${where.join(' AND ')} LIMIT ?`).bind(...args, limit).all<NodeRow>()
     : await c.env.DB.prepare(
       `WITH RECURSIVE sub(id) AS (
-         SELECT ?1 UNION ALL SELECT n.id FROM nodes n JOIN sub ON n.parent_id = sub.id WHERE n.deleted_at IS NULL AND n.kind = 'dir' LIMIT 20000
-       ) SELECT n.* FROM nodes n JOIN sub ON n.parent_id = sub.id WHERE n.deleted_at IS NULL AND n.name LIKE ?2 ESCAPE '\\' LIMIT ?3`,
-    ).bind(c.get('principal').rootId, like, limit).all<NodeRow>();
+         SELECT ? UNION ALL SELECT n.id FROM nodes n JOIN sub ON n.parent_id = sub.id WHERE n.deleted_at IS NULL AND n.kind = 'dir' LIMIT 20000
+       ) SELECT n.* FROM nodes n JOIN sub ON n.parent_id = sub.id WHERE ${where.join(' AND ')} LIMIT ?`,
+    ).bind(rootId, ...args, limit).all<NodeRow>();
   // 路径和权限一次批量查完, 不再每条结果查一次
   const p = c.get('principal');
   const paths = await pathsOf(c.env, r.results);

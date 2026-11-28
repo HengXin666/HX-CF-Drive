@@ -45,7 +45,7 @@ node scripts/hxd.mjs share /a.zip [密码] [天数]
 | 建目录 | `POST /api/v1/fs/mkdir {"path":"/a/b"}` |
 | 移动/重命名 | `POST /api/v1/fs/move {"path":"/x","toPath":"/dir","name":"y","overwrite":false}` |
 | 删除 | `POST /api/v1/fs/delete {"path":"/x"}` (进回收站, 可 restore) |
-| 搜索 | `GET /api/v1/fs/search?q=kw` (扫整个令牌子树, 每令牌每分钟 6 次; 已知目录时优先 list 后本地过滤) |
+| 搜索 | `GET /api/v1/fs/search?q=kw&type=image&dir=/x` (q / type 至少一个; type: image, video, audio, doc, archive, other; 带 dir 只扫该子树更便宜; 每令牌每分钟 6 次; 已知目录时优先 list 后本地过滤) |
 | 直链 | `POST /api/v1/fs/link {"path":"/x","expiresIn":0}` → `{"url"}` |
 | MCP | `POST /api/v1/mcp` (JSON-RPC, 工具 list / stat / search / upload / link / share, 鉴权同上); 支持 MCP 的 Agent 可直接把它配成远程 HTTP 服务器 |
 | 批量操作 | `POST /api/v1/fs/batch {"op":"move|copy|delete|restore|rename","ids":[...],"toPath":"/x"}`; rename 用 `"items":[{"id","name"}]` → `{"ok","failed":[{id,error}]}` (≤ 500 项) |

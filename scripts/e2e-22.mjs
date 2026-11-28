@@ -159,5 +159,22 @@ if (sect('dav')) {
   ok(/<D:quota-used-bytes>1000<\/D:quota-used-bytes>/.test(x), '受限令牌按自己子树统计已用 (1000 字节)');
 }
 
+if (sect('search')) {
+  const D = `${P}/search`;
+  await put(`${D}/a`, 'cat.png', 'x', 'image/png');
+  await put(`${D}/a/deep`, 'cat2.JPG', 'x', 'application/octet-stream');
+  await put(`${D}/a`, 'cat.mp4', 'x', 'video/mp4');
+  await put(`${D}/a`, 'notes.md', 'x', 'application/octet-stream');
+  await put(`${D}/b`, 'cat3.png', 'x', 'image/png');
+  const s = async (qs, label) => (await j('GET', `/api/v1/fs/search?${new URLSearchParams(qs)}`, undefined, {}, label));
+  let r = await s({ type: 'image', dir: `${D}/a` }, '搜索 type=image dir=子树');
+  ok(r.status === 200 && r.body.items.map((x) => x.name).sort().join(',') === 'cat.png,cat2.JPG', `按类型 + 当前目录子树 (${r.body.items?.map((x) => x.name)})`);
+  r = await s({ q: 'cat', dir: D, type: 'video' });
+  ok(r.body.items.length === 1 && r.body.items[0].path === `${D}/a/cat.mp4`, '关键字 + 类型, 返回完整路径');
+  r = await s({ type: 'doc', dir: D });
+  ok(r.body.items.length === 1 && r.body.items[0].name === 'notes.md', '扩展名识别文档 (MIME 是 octet-stream)');
+  ok((await s({ type: 'bogus' })).status === 400 && (await s({})).status === 400, '坏类型 / 什么都不给 400');
+}
+
 console.log(`\n${pass} 项通过`);
 if (meter.length) { console.log('\nD1 实测 (查询 / 行读 / 行写):'); for (const [l, m] of meter) console.log(`  ${l}: ${m}`); }

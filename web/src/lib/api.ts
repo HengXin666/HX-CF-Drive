@@ -62,7 +62,8 @@ export const fs = {
   /** 彻底删除一个回收站项目。more=1 表示还有积压, 由定时维护接着清 */
   purge: (id: string) => api<PurgeResult>('POST', '/fs/purge', { id }),
   emptyTrash: () => api<PurgeResult>('POST', '/fs/trash/empty'),
-  search: (q: string) => api<{ items: Node[] }>('GET', `/fs/search?q=${encodeURIComponent(q)}`),
+  /** 搜索: q 和 type 至少一个; dir 只搜这个目录的子树 (#22) */
+  search: (q: string, o: { type?: string; dir?: string } = {}) => api<{ items: Node[] }>('GET', `/fs/search?${new URLSearchParams({ ...(q ? { q } : {}), ...(o.type ? { type: o.type } : {}), ...(o.dir ? { dir: o.dir } : {}) })}`),
   link: (id: string, expiresIn = 0) => api<{ url: string }>('POST', '/fs/link', { id, expiresIn }),
   /** 批量操作 (#22): 一个请求, 服务端一个 D1 batch; 校验不过的项在 failed 里 */
   batch: (b: { op: 'move' | 'copy' | 'delete' | 'restore' | 'rename'; ids?: string[]; items?: { id: string; name: string }[]; toPath?: string; overwrite?: boolean }) =>

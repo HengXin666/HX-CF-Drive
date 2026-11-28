@@ -47,9 +47,17 @@ export const TOOLS: Tool[] = [
   },
   {
     name: 'search',
-    description: '按文件名模糊搜索整个令牌根目录 (需要 read, 每令牌每分钟限 6 次)。',
-    inputSchema: { type: 'object', properties: { q: { type: 'string', description: '名字里包含的文字' }, limit: { type: 'integer', minimum: 1, maximum: 200 } }, required: ['q'] },
-    run: (a, call) => call('GET', `/fs/search?${q({ q: str(a.q), limit: num(a.limit) })}`),
+    description: '按文件名和 / 或类型搜索 (需要 read, 每令牌每分钟限 6 次)。q 和 type 至少给一个; dir 只搜该目录的子树 (更快), 不给则搜整个令牌根目录。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        q: { type: 'string', description: '名字里包含的文字' },
+        type: { type: 'string', enum: ['image', 'video', 'audio', 'doc', 'archive', 'other'] },
+        dir: { type: 'string', description: '只在这个目录及子目录里搜' },
+        limit: { type: 'integer', minimum: 1, maximum: 200 },
+      },
+    },
+    run: (a, call) => call('GET', `/fs/search?${q({ q: str(a.q), type: str(a.type), dir: str(a.dir), limit: num(a.limit) })}`),
   },
   {
     name: 'upload',

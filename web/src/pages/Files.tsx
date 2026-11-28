@@ -12,6 +12,8 @@ import { UploadQueue, uploads } from '../components/UploadQueue';
 import { fileIcon } from '../icons';
 import { admin, ApiError, fmtSize, fmtTime, fs, joinPath, type Node, shares, tempLink, type TokenRow } from '../lib/api';
 import { isImage, load as loadImage, peek, usePrefs, wantsPreview } from '../lib/imgcache';
+import { type Category, CATEGORIES, CATEGORY_LABEL, categoryOf } from '../../../src/lib/category';
+import type { IconName } from '../icons';
 import { fromClipboard, fromDrop, fromInput } from '../lib/picker';
 import { download } from '../lib/transfer';
 import {
@@ -25,6 +27,7 @@ const UploadSettings = lazy(() => import('../components/UploadSettings').then((m
 const RenameDialog = lazy(() => import('../components/RenameDialog').then((m) => ({ default: m.RenameDialog })));
 const Preview = lazy(() => import('../components/Preview').then((m) => ({ default: m.Preview })));
 
+const CAT_ICON: Record<Category, IconName> = { image: 'image', video: 'video', audio: 'audio', doc: 'fileText', archive: 'zip', other: 'more' };
 const parentOf = (p: string) => p.replace(/\/[^/]+\/?$/, '') || '/';
 /** 和服务端 listChildren 一样的顺序: 目录在前, 名字按 locale 不分大小写 */
 const COLL = new Intl.Collator(undefined, { sensitivity: 'base' });
@@ -83,6 +86,8 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
   const [q, setQ] = useState('');
   const [searching, setSearching] = useState<Node[] | null>(null);
   const [searchedQ, setSearchedQ] = useState('');
+  // 按类型筛选 (#22): 当前目录本地筛选 (0 请求), 搜索时也带上
+  const [cat, setCat] = useState<Category | ''>('');
   const [prompt, setPrompt] = useState<PromptRequest | null>(null);
   const [moving, setMoving] = useState<Item[] | null>(null);
   const [copying, setCopying] = useState<Item[] | null>(null);
@@ -127,7 +132,7 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
     }
   }, [path, go]);
 
-  useEffect(() => { setSearching(null); setQ(''); void load(); }, [load]);
+  useEffect(() => { setSearching(null); setQ(''); setCat(''); void load(); }, [load]);
   // 用量统计是维护任务写的快照, 文件操作和上传不会让它马上变, 所以这里不再刷新侧栏 (以前每传完一个文件就全表扫一次 nodes + blobs)
   const changed = useCallback(() => { void load(); }, [load]);
   // 上传完一个文件: 服务端返回的节点直接插进当前列表 (同名的覆盖), 不再每个文件重新列一次目录
@@ -170,11 +175,12 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
     return () => document.removeEventListener('paste', onPaste);
   }, []);
 
-  const runSearch = async () => {
-    if (!q.trim()) { setSearching(null); return; }
+  /** 服务端搜索: here = 只搜当前目录的子树 (比全盘便宜), 否则全盘; 带上类型筛选 (#22) */
+  const runSearch = async (here = false) => {
+    if (!q.trim() && !cat) { setSearching(null); return; }
     try {
-      setSearching((await fs.search(q.trim())).items);
-      setSearchedQ(q.trim());
+      setSearching((await fs.search(q.trim(), { type: cat || undefined, dir: here ? path : undefined })).items);
+      setSearchedQ(`${here ? `${path === '/' ? '全部文件' : path} 内` : '全盘'}${q.trim() ? `搜索 “${q.trim()}”` : ''}${cat ? ` · ${CATEGORY_LABEL[cat]}` : ''}`);
     } catch (e) {
       toast.error(e instanceof ApiError && e.status === 429 ? '搜索太频繁, 稍后再试' : (e as Error).message);
     }
@@ -351,21 +357,43 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
   const here = path.split('/').filter(Boolean).pop();
   // 搜索框默认只在当前目录已加载的列表里筛选 (#23, 0 请求); 全盘搜索要点按钮, 走 /fs/search (LIKE 扫全库)
   const needle = q.trim().toLocaleLowerCase();
-  const filtered = useMemo(() => (needle ? rows.filter((n) => n.name.toLocaleLowerCase().includes(needle)) : rows), [rows, needle]);
+  const filtered = useMemo(() => (needle || cat
+    ? rows.filter((n) => (!needle || n.name.toLocaleLowerCase().includes(needle)) && (!cat || categoryOf(n.kind, n.mime, n.name) === cat))
+    : rows), [rows, needle, cat]);
   const list = searching ?? filtered;
   const dirCount = list.filter((n) => n.kind === 'dir').length;
 
   const toolbar = (
     <>
       {/* 输入即在当前目录筛选; 回车不发请求, 全盘搜索是显式按钮 */}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button size="sm" variant={cat ? 'secondary' : 'outline'} aria-label="按类型筛选">
+            <Icon name="filter" /><span className="hidden sm:inline">{cat ? CATEGORY_LABEL[cat] : '类型'}</span>
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="min-w-36">
+          <DropdownMenuItem onSelect={() => setCat('')}><Icon name={cat ? 'files' : 'check'} /> 全部类型</DropdownMenuItem>
+          <DropdownMenuSeparator />
+          {CATEGORIES.map((c) => (
+            <DropdownMenuItem key={c} onSelect={() => setCat(c)}><Icon name={cat === c ? 'check' : CAT_ICON[c]} /> {CATEGORY_LABEL[c]}</DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
       <form onSubmit={(e) => e.preventDefault()}>
         <Input size="sm" className="w-40 sm:w-60" leading={<Icon name="search" />} placeholder="筛选当前目录" aria-label="筛选当前目录"
           value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Escape') setQ(''); }} />
       </form>
-      {needle && !searching && (
-        <Button size="sm" variant="outline" aria-label="搜索全部文件" onClick={() => void runSearch()}>
-          <Icon name="search" /><span className="hidden sm:inline">全盘搜索</span>
-        </Button>
+      {(needle || cat) && !searching && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button size="sm" variant="outline" aria-label="搜索"><Icon name="search" /><span className="hidden sm:inline">搜索</span></Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-48">
+            <DropdownMenuItem onSelect={() => void runSearch(true)}><Icon name="folder" /> 搜索当前目录及子目录</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void runSearch(false)}><Icon name="search" /> 搜索全部文件</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       )}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -438,11 +466,11 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
     <Page
       eyebrow={<Crumbs path={path} go={go} />}
       icon={searching ? 'search' : path === '/' ? 'files' : 'folder'}
-      title={searching ? `全盘搜索 “${searchedQ}”` : here ?? '全部文件'}
+      title={searching ? searchedQ : here ?? '全部文件'}
       meta={loading ? <span className="inline-flex items-center gap-1.5"><Icon name="spinner" className="size-3.5 animate-spin" />加载中…</span> : searching
         ? <><Meta icon="fileText">{searching.length} 条结果</Meta><button type="button" className="inline-flex items-center gap-1 text-brand hover:underline" onClick={() => setSearching(null)}><Icon name="back" className="size-3.5" />返回目录</button></>
-        : needle
-          ? <><Meta icon="search">当前目录 {list.length} / {rows.length} 项匹配</Meta><button type="button" className="inline-flex items-center gap-1 text-brand hover:underline" onClick={() => void runSearch()}><Icon name="search" className="size-3.5" />搜索全部文件</button></>
+        : needle || cat
+          ? <><Meta icon="search">当前目录 {list.length} / {rows.length} 项匹配</Meta><button type="button" className="inline-flex items-center gap-1 text-brand hover:underline" onClick={() => void runSearch(true)}><Icon name="search" className="size-3.5" />搜索子目录</button><button type="button" className="inline-flex items-center gap-1 text-brand hover:underline" onClick={() => void runSearch()}><Icon name="search" className="size-3.5" />搜索全部文件</button></>
           : <><Meta icon="folder">{dirCount}</Meta><Meta icon="fileText">{list.length - dirCount}</Meta><span className="hidden items-center gap-1 sm:inline-flex"><Icon name="upload" className="size-3.5" />可拖入文件 / 文件夹或粘贴上传</span></>}
     >
       <div
