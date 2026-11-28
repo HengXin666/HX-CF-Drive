@@ -2,6 +2,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ContextMenu, useContextMenu } from '../components/ContextMenu';
 import { Icon, IconButton } from '../components/Icon';
+import { Grid } from '../components/Grid';
 import { ImageCell } from '../components/ImageCell';
 import type { PreviewTarget } from '../components/Preview';
 import { PromptDialog, type PromptRequest } from '../components/PromptDialog';
@@ -90,6 +91,9 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
   if (preview) used.preview = true;
   const [drag, setDrag] = useState(false);
   const [img, setImg] = usePrefs();
+  // 列表 / 网格视图 (#22), 记在本浏览器
+  const [view, setViewState] = useState<'list' | 'grid'>(() => (localStorage.getItem('hxd_view') === 'grid' ? 'grid' : 'list'));
+  const setView = (v: 'list' | 'grid') => { localStorage.setItem('hxd_view', v); setViewState(v); };
   const rowMenu = useContextMenu<Node>();
   const blankMenu = useContextMenu<null>();
   const picker = useRef<HTMLInputElement>(null);
@@ -332,6 +336,83 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
   const list = searching ?? filtered;
   const dirCount = list.filter((n) => n.kind === 'dir').length;
 
+  const toolbar = (
+    <>
+      {/* 输入即在当前目录筛选; 回车不发请求, 全盘搜索是显式按钮 */}
+      <form onSubmit={(e) => e.preventDefault()}>
+        <Input size="sm" className="w-40 sm:w-60" leading={<Icon name="search" />} placeholder="筛选当前目录" aria-label="筛选当前目录"
+          value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Escape') setQ(''); }} />
+      </form>
+      {needle && !searching && (
+        <Button size="sm" variant="outline" aria-label="搜索全部文件" onClick={() => void runSearch()}>
+          <Icon name="search" /><span className="hidden sm:inline">全盘搜索</span>
+        </Button>
+      )}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button size="sm" variant={img.on ? 'secondary' : 'outline'} aria-label="图片预览">
+            <Icon name="image" /><span className="hidden sm:inline">{img.on ? `预览 ≤ ${img.maxMB} MB` : '图片预览'}</span>
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="min-w-48">
+          <DropdownMenuItem onSelect={() => setImg({ ...img, on: !img.on })}>
+            <Icon name={img.on ? 'close' : 'eye'} /> {img.on ? '关闭图片预览' : '在列表里显示图片'}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          {[1, 2, 5, 10, 20].map((mb) => (
+            <DropdownMenuItem key={mb} onSelect={() => setImg({ on: true, maxMB: mb })}>
+              <Icon name={img.on && img.maxMB === mb ? 'check' : 'image'} /> 只显示 ≤ {mb} MB 的图片
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <Button size="sm" variant="outline" aria-label={view === 'grid' ? '列表视图' : '网格视图'} title={view === 'grid' ? '切换到列表视图' : '切换到网格视图'}
+        onClick={() => setView(view === 'grid' ? 'list' : 'grid')}>
+        <Icon name={view === 'grid' ? 'list' : 'grid'} />
+      </Button>
+      <Button size="sm" variant="outline" aria-label="新建目录" onClick={() => setPrompt({
+        title: '新建目录', fields: [{ key: 'name', label: '目录名' }],
+        onOk: async (v) => { await fs.mkdir(joinPath(path, v.name.trim())); changed(); },
+      })}>
+        <Icon name="newFolder" /><span className="hidden sm:inline">新建目录</span>
+      </Button>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button size="sm" aria-label="上传"><Icon name="upload" /><span className="hidden sm:inline">上传</span></Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="min-w-44">
+          <DropdownMenuItem onSelect={() => picker.current?.click()}><Icon name="upload" /> 上传文件</DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => dirPicker.current?.click()}><Icon name="folderUp" /> 上传文件夹</DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onSelect={() => setSettings(true)}><Icon name="settings" /> 上传设置 (压缩 / WebP)…</DropdownMenuItem>
+          <DropdownMenuItem disabled><Icon name="clipboard" /> 也可以 Ctrl+V 粘贴</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <input ref={picker} type="file" multiple hidden onChange={(e) => {
+        if (e.target.files?.length) uploads.add([...e.target.files], path);
+        e.target.value = '';
+      }} />
+      <input ref={dirPicker} type="file" multiple hidden data-testid="dir-picker" onChange={(e) => {
+        if (e.target.files?.length) void enqueue(fromInput(e.target.files, path));
+        e.target.value = '';
+      }} />
+    </>
+  );
+  const bulk = (sel: Node[], clear: () => void) => (
+    <>
+      {sel.some((n) => n.kind === 'file') && (
+        <Button size="sm" variant="outline" aria-label="复制链接" onClick={() => setLinking(sel)}><Icon name="link" /><span className="hidden sm:inline">复制链接</span></Button>
+      )}
+      <Button size="sm" variant="outline" aria-label="移动到" onClick={() => setMoving(sel.map(full))}><Icon name="move" /><span className="hidden sm:inline">移动到…</span></Button>
+      <Button size="sm" variant="destructive" aria-label="删除" onClick={() => void remove(sel.map(full), clear)}><Icon name="trash" /><span className="hidden sm:inline">删除</span></Button>
+    </>
+  );
+  // 网格视图的多选 (列表视图的多选在表格里)
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  useEffect(() => setPicked(new Set()), [path, view, searching]);
+  const pickedRows = list.filter((n) => picked.has(n.id));
+  const clearPicked = () => setPicked(new Set());
+
   return (
     <Page
       eyebrow={<Crumbs path={path} go={go} />}
@@ -359,84 +440,39 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
           fromDrop(e.dataTransfer, path).then((r) => enqueue(r.files, r.emptyDirs), fail);
         }}
       >
+        {view === 'grid' ? (
+          <div className="flex flex-col gap-3">
+            <div className="flex min-h-9 flex-wrap items-center justify-end gap-2">
+              {pickedRows.length ? (
+                <>
+                  <Button size="sm" variant="ghost" aria-label="取消选择" onClick={clearPicked}><Icon name="close" /></Button>
+                  <span className="mr-auto text-sm">已选 {pickedRows.length} 项</span>
+                  <Button size="sm" variant="ghost" onClick={() => setPicked(new Set(list.map((n) => n.id)))}>全选</Button>
+                  {bulk(pickedRows, clearPicked)}
+                </>
+              ) : toolbar}
+            </div>
+            <Grid rows={list} img={img} selected={picked} loading={loading}
+              onToggle={(n) => setPicked((s) => { const x = new Set(s); if (!x.delete(n.id)) x.add(n.id); return x; })}
+              onOpen={(n) => { open(n).catch(fail); }}
+              onContextMenu={(n, e) => rowMenu.open(e, n)}
+              empty={searching ? '没有匹配的文件' : '空目录, 把文件拖进来或点上传'} />
+          </div>
+        ) : (
         <DataTable
           columns={columns}
           rows={list}
           rowKey={(n) => n.id}
           loading={loading}
           selectable
-          toolbar={(
-            <>
-              {/* 输入即在当前目录筛选; 回车不发请求, 全盘搜索是显式按钮 */}
-              <form onSubmit={(e) => e.preventDefault()}>
-                <Input size="sm" className="w-40 sm:w-60" leading={<Icon name="search" />} placeholder="筛选当前目录" aria-label="筛选当前目录"
-                  value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Escape') setQ(''); }} />
-              </form>
-              {needle && !searching && (
-                <Button size="sm" variant="outline" aria-label="搜索全部文件" onClick={() => void runSearch()}>
-                  <Icon name="search" /><span className="hidden sm:inline">全盘搜索</span>
-                </Button>
-              )}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button size="sm" variant={img.on ? 'secondary' : 'outline'} aria-label="图片预览">
-                    <Icon name="image" /><span className="hidden sm:inline">{img.on ? `预览 ≤ ${img.maxMB} MB` : '图片预览'}</span>
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="min-w-48">
-                  <DropdownMenuItem onSelect={() => setImg({ ...img, on: !img.on })}>
-                    <Icon name={img.on ? 'close' : 'eye'} /> {img.on ? '关闭图片预览' : '在列表里显示图片'}
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  {[1, 2, 5, 10, 20].map((mb) => (
-                    <DropdownMenuItem key={mb} onSelect={() => setImg({ on: true, maxMB: mb })}>
-                      <Icon name={img.on && img.maxMB === mb ? 'check' : 'image'} /> 只显示 ≤ {mb} MB 的图片
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <Button size="sm" variant="outline" aria-label="新建目录" onClick={() => setPrompt({
-                title: '新建目录', fields: [{ key: 'name', label: '目录名' }],
-                onOk: async (v) => { await fs.mkdir(joinPath(path, v.name.trim())); changed(); },
-              })}>
-                <Icon name="newFolder" /><span className="hidden sm:inline">新建目录</span>
-              </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button size="sm" aria-label="上传"><Icon name="upload" /><span className="hidden sm:inline">上传</span></Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="min-w-44">
-                  <DropdownMenuItem onSelect={() => picker.current?.click()}><Icon name="upload" /> 上传文件</DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => dirPicker.current?.click()}><Icon name="folderUp" /> 上传文件夹</DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onSelect={() => setSettings(true)}><Icon name="settings" /> 上传设置 (压缩 / WebP)…</DropdownMenuItem>
-                  <DropdownMenuItem disabled><Icon name="clipboard" /> 也可以 Ctrl+V 粘贴</DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <input ref={picker} type="file" multiple hidden onChange={(e) => {
-                if (e.target.files?.length) uploads.add([...e.target.files], path);
-                e.target.value = '';
-              }} />
-              <input ref={dirPicker} type="file" multiple hidden data-testid="dir-picker" onChange={(e) => {
-                if (e.target.files?.length) void enqueue(fromInput(e.target.files, path));
-                e.target.value = '';
-              }} />
-            </>
-          )}
-          bulkActions={(sel, clear) => (
-            <>
-              {sel.some((n) => n.kind === 'file') && (
-                <Button size="sm" variant="outline" aria-label="复制链接" onClick={() => setLinking(sel)}><Icon name="link" /><span className="hidden sm:inline">复制链接</span></Button>
-              )}
-              <Button size="sm" variant="outline" aria-label="移动到" onClick={() => setMoving(sel.map(full))}><Icon name="move" /><span className="hidden sm:inline">移动到…</span></Button>
-              <Button size="sm" variant="destructive" aria-label="删除" onClick={() => void remove(sel.map(full), clear)}><Icon name="trash" /><span className="hidden sm:inline">删除</span></Button>
-            </>
-          )}
+          toolbar={toolbar}
+          bulkActions={bulk}
           onRowClick={(n) => { open(n).catch((e) => toast.error((e as Error).message)); }}
           onRowContextMenu={(n, e) => rowMenu.open(e, n)}
           emptyText={searching ? '没有匹配的文件' : '空目录, 把文件拖进来或点上传'}
           emptyIcon={searching ? 'search' : 'upload'}
         />
+        )}
       </div>
       <ContextMenu at={rowMenu.at} onClose={rowMenu.close}>
         {(n) => (
