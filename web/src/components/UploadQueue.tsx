@@ -63,7 +63,12 @@ function pump() {
 
 export const uploads = {
   add(files: File[], dir: string) {
-    const fresh = files.map((file) => ({ id: ++seq, file, dir, p: { phase: 'hash', ratio: 0 } as P }));
+    this.addTree(files.map((file) => ({ file, dir })));
+  },
+  /** 每个文件各自的目标目录 (文件夹上传, #22): 服务端按 path 自动建目录, 保留层级 */
+  addTree(list: { file: File; dir: string }[]) {
+    if (!list.length) return;
+    const fresh = list.map(({ file, dir }) => ({ id: ++seq, file, dir, p: { phase: 'hash', ratio: 0 } as P }));
     items = [...items, ...fresh];
     waiting.push(...fresh);
     emit(true);

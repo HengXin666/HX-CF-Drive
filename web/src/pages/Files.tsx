@@ -11,6 +11,7 @@ import { UploadQueue, uploads } from '../components/UploadQueue';
 import { fileIcon } from '../icons';
 import { admin, ApiError, fmtSize, fmtTime, fs, joinPath, type Node, shares, tempLink, type TokenRow } from '../lib/api';
 import { isImage, load as loadImage, peek, usePrefs, wantsPreview } from '../lib/imgcache';
+import { fromClipboard, fromDrop, fromInput } from '../lib/picker';
 import { download } from '../lib/transfer';
 import {
   Button, cn, confirmDialog, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger, Input, toast,
@@ -86,6 +87,9 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
   const rowMenu = useContextMenu<Node>();
   const blankMenu = useContextMenu<null>();
   const picker = useRef<HTMLInputElement>(null);
+  const dirPicker = useRef<HTMLInputElement>(null);
+  // React 不认 webkitdirectory 属性, 挂载后手动加上
+  useEffect(() => { dirPicker.current?.setAttribute('webkitdirectory', ''); }, []);
   // 只有管理员能列令牌; 不是管理员就不发这个必然 403 的请求
   const [tokens, setTokens] = useState<TokenRow[]>([]);
   useEffect(() => { if (isAdmin) admin.tokens().then((r) => setTokens(r.items), () => setTokens([])); }, [isAdmin]);
@@ -108,12 +112,42 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
   // 上传完一个文件: 服务端返回的节点直接插进当前列表 (同名的覆盖), 不再每个文件重新列一次目录
   const pathRef = useRef(path);
   pathRef.current = path;
+  // 传进了当前目录的子目录 (文件夹上传): 新目录要等全部传完重新列一次才看得到
+  const nested = useRef(false);
+  const loadRef = useRef(load);
+  loadRef.current = load;
   useEffect(() => uploads.bind({
     onUploaded: (node, dir) => {
-      if (dir !== pathRef.current) return;
+      if (dir !== pathRef.current) {
+        if (dir.startsWith(pathRef.current === '/' ? '/' : pathRef.current + '/')) nested.current = true;
+        return;
+      }
       setRows((list) => [...list.filter((x) => x.id !== node.id && x.name !== node.name), node].sort(byKindName));
     },
+    onIdle: () => { if (nested.current) { nested.current = false; void loadRef.current(); } },
   }), []);
+
+  /** 文件夹上传: 文件按相对路径进队列, 空目录先建出来 */
+  const enqueue = async (list: { file: File; dir: string }[], emptyDirs: string[] = []) => {
+    for (const d of emptyDirs) await fs.mkdir(d).catch(fail);
+    if (emptyDirs.length && !list.length) { changed(); return; }
+    if (list.some((x) => x.dir !== path)) nested.current = true;
+    uploads.addTree(list);
+  };
+
+  // 粘贴上传 (#22): 焦点不在输入框时 Ctrl+V 粘贴图片或文件, 传到当前目录
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      if ((e.target as HTMLElement | null)?.closest?.('input, textarea, [contenteditable]')) return;
+      const files = fromClipboard(e.clipboardData);
+      if (!files.length) return;
+      e.preventDefault();
+      uploads.add(files, pathRef.current);
+      toast.info(`已粘贴 ${files.length} 个文件, 开始上传`);
+    };
+    document.addEventListener('paste', onPaste);
+    return () => document.removeEventListener('paste', onPaste);
+  }, []);
 
   const runSearch = async () => {
     if (!q.trim()) { setSearching(null); return; }
@@ -301,7 +335,7 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
         ? <><Meta icon="fileText">{searching.length} 条结果</Meta><button type="button" className="inline-flex items-center gap-1 text-brand hover:underline" onClick={() => setSearching(null)}><Icon name="back" className="size-3.5" />返回目录</button></>
         : needle
           ? <><Meta icon="search">当前目录 {list.length} / {rows.length} 项匹配</Meta><button type="button" className="inline-flex items-center gap-1 text-brand hover:underline" onClick={() => void runSearch()}><Icon name="search" className="size-3.5" />搜索全部文件</button></>
-          : <><Meta icon="folder">{dirCount}</Meta><Meta icon="fileText">{list.length - dirCount}</Meta><span className="hidden items-center gap-1 sm:inline-flex"><Icon name="upload" className="size-3.5" />可直接拖入上传</span></>}
+          : <><Meta icon="folder">{dirCount}</Meta><Meta icon="fileText">{list.length - dirCount}</Meta><span className="hidden items-center gap-1 sm:inline-flex"><Icon name="upload" className="size-3.5" />可拖入文件 / 文件夹或粘贴上传</span></>}
     >
       <div
         className={cn('relative rounded-xl transition-shadow', drag && 'ring-2 ring-brand ring-offset-4 ring-offset-background')}
@@ -315,7 +349,8 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
         onDrop={(e) => {
           e.preventDefault();
           setDrag(false);
-          if (e.dataTransfer.files.length) uploads.add([...e.dataTransfer.files], path);
+          if (!e.dataTransfer.files.length) return;
+          fromDrop(e.dataTransfer, path).then((r) => enqueue(r.files, r.emptyDirs), fail);
         }}
       >
         <DataTable
@@ -360,11 +395,23 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
               })}>
                 <Icon name="newFolder" /><span className="hidden sm:inline">新建目录</span>
               </Button>
-              <Button size="sm" aria-label="上传" onClick={() => picker.current?.click()}>
-                <Icon name="upload" /><span className="hidden sm:inline">上传</span>
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="sm" aria-label="上传"><Icon name="upload" /><span className="hidden sm:inline">上传</span></Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="min-w-44">
+                  <DropdownMenuItem onSelect={() => picker.current?.click()}><Icon name="upload" /> 上传文件</DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => dirPicker.current?.click()}><Icon name="folderUp" /> 上传文件夹</DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem disabled><Icon name="clipboard" /> 也可以 Ctrl+V 粘贴</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               <input ref={picker} type="file" multiple hidden onChange={(e) => {
                 if (e.target.files?.length) uploads.add([...e.target.files], path);
+                e.target.value = '';
+              }} />
+              <input ref={dirPicker} type="file" multiple hidden data-testid="dir-picker" onChange={(e) => {
+                if (e.target.files?.length) void enqueue(fromInput(e.target.files, path));
                 e.target.value = '';
               }} />
             </>
@@ -401,6 +448,7 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
           <>
             <DropdownMenuItem onSelect={mkdir}><Icon name="newFolder" /> 新建目录</DropdownMenuItem>
             <DropdownMenuItem onSelect={() => picker.current?.click()}><Icon name="upload" /> 上传文件</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => dirPicker.current?.click()}><Icon name="folderUp" /> 上传文件夹</DropdownMenuItem>
             <DropdownMenuItem onSelect={() => void load()}><Icon name="refresh" /> 刷新</DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={() => setImg({ ...img, on: !img.on })}><Icon name={img.on ? 'close' : 'image'} /> {img.on ? '关闭图片预览' : '在列表里显示图片'}</DropdownMenuItem>
