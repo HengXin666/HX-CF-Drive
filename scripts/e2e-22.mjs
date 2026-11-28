@@ -79,5 +79,30 @@ if (sect('batch')) {
   ok((await j('POST', '/api/v1/fs/batch', { op: 'nuke', ids: [] })).status === 400, '未知 op 返回 400');
 }
 
+if (sect('share')) {
+  const f = await put(`${P}/share`, 's.txt', 'SHARED');
+  const sh = (await j('POST', '/api/v1/shares', { id: f.id, password: 'p1', remark: '给小明' })).body;
+  const get = (q = '', h = {}) => fetch(`${BASE}/s/${sh.id}${q}`, { headers: h });
+  ok((await get('?p=p1')).status === 200, '创建带密码和备注的分享');
+  let r = await j('PATCH', `/api/v1/shares/${sh.id}`, { disabled: true, remark: '已发' }, {}, 'PATCH share 停用+备注');
+  ok(r.status === 200 && r.body.share.disabled === 1 && r.body.share.remark === '已发', '停用并改备注');
+  ok((await get('?p=p1')).status === 410, '停用后访问返回 410');
+  const page = await (await get('', { Accept: 'text/html' })).text();
+  ok(page.includes('分享已停用'), '浏览器打开显示 分享已停用 页面');
+  await j('PATCH', `/api/v1/shares/${sh.id}`, { disabled: false, password: 'p2' });
+  ok((await get('?p=p1')).status === 401 && (await get('?p=p2')).status === 200, '启用并改密码: 旧密码失效, 新密码可用');
+  await j('PATCH', `/api/v1/shares/${sh.id}`, { password: null, expiresIn: 1 });
+  ok((await (await get()).text()) === 'SHARED', '去掉密码后直接可访问');
+  await new Promise((s) => setTimeout(s, 1200));
+  ok((await get()).status === 404, '有效期改成 1 秒, 过期后 404');
+  await j('PATCH', `/api/v1/shares/${sh.id}`, { expiresIn: null });
+  ok((await get()).status === 200, '改回永久');
+  const row = (await j('GET', '/api/v1/shares')).body.items.find((x) => x.id === sh.id);
+  ok(row && row.remark === '已发' && row.disabled === 0 && row.has_password === 0 && row.expires_at === null, '分享列表带上状态和备注');
+  ok((await j('PATCH', `/api/v1/shares/${sh.id}`, {})).status === 400, '没有要改的字段返回 400');
+  const t = (await j('POST', '/api/v1/admin/tokens', { name: 'e2e22s', scopes: ['read', 'write'], rootPath: `${P}/elsewhere` })).body.token;
+  ok((await j('PATCH', `/api/v1/shares/${sh.id}`, { disabled: true }, { Authorization: `Bearer ${t}` })).status === 403, '受限令牌改不了根外的分享');
+}
+
 console.log(`\n${pass} 项通过`);
 if (meter.length) { console.log('\nD1 实测 (查询 / 行读 / 行写):'); for (const [l, m] of meter) console.log(`  ${l}: ${m}`); }

@@ -53,6 +53,7 @@ node scripts/hxd.mjs share /a.zip [密码] [天数]
 | 读内容 | `GET /api/v1/files/<id>/content` (支持 Range); 带 `?v=<version>` 且等于当前版本时回 `immutable`, 可长期缓存 |
 | 小文件上传 | `POST /api/v1/upload?path=/dir&rename=1` multipart 字段 `file` |
 | 分享 | `POST /api/v1/shares {"path":"/x","password":"","expiresIn":604800}` |
+| 编辑分享 | `PATCH /api/v1/shares/<id> {"disabled":true,"remark":"..","password":null,"expiresIn":null}` (只改传了的字段) |
 
 节点 (Node) 字段: `id, name, kind ("dir"|"file"), size, mime, parentId, createdAt, updatedAt` (毫秒时间戳), `version` (文件内容版本, 即内容哈希 id; 覆盖上传后会变, 目录为 null)。
 

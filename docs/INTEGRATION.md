@@ -45,7 +45,8 @@ curl -X POST -H "Authorization: Bearer $ADMIN" -H "Content-Type: application/jso
 | PUT | `/api/v1/uploads/chunk?i=&ticket=` | 分片上传: 传第 i 片, 返回签名回执 receipt。可以不带令牌, 只凭票据 (v0.4, 见下文 "只凭票据直传") |
 | POST | `/api/v1/uploads/fold` `{ticket, receipts}` | 分片上传 (可选): 一组 256 片的回执换一个聚合回执 fold |
 | POST | `/api/v1/uploads/commit` `{ticket, receipts, folds}` | 分片上传: 提交回执和聚合回执 |
-| POST/GET/DELETE | `/api/v1/shares` | 分享链接 |
+| POST/GET/DELETE | `/api/v1/shares` | 分享链接 (创建时可带 `remark`) |
+| PATCH | `/api/v1/shares/:id` `{password, expiresIn, disabled, remark}` | 编辑分享, 只改传了的字段; `password: null` 去掉密码, `expiresIn: null` 永久, 停用后访问返回 410 |
 | GET | `/f/:id/:name?e=&s=` | 签名直链 (公开) |
 | GET | `/s/:id?path=子路径` | 分享 (公开); 有密码时用 `X-Share-Password` 头 (也接受 `?p=`, 但会进日志和历史), 连错 10 次锁 15 分钟。浏览器打开 (`Accept: text/html`) 时返回页面 (v0.4): 密码输入, 文件夹列表, 下载按钮; `?download=1` 下载, `?raw=1` 照旧返回 JSON / 文件本身。页面里的密码表单 `POST /s/:id` (表单字段 `p`, `path`), 输对后发一个只对该分享有效 1 天的 HttpOnly Cookie, 之后的链接不带密码 |
 | * | `/api/v1/admin/*` | 管理: stats, bots, channels, tokens, maintenance |

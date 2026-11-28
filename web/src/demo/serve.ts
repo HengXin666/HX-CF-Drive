@@ -64,6 +64,7 @@ export async function servePublicFile(rest: string, url: URL, req: Request): Pro
 export async function serveShare(rest: string, url: URL, req: Request): Promise<Response> {
   const sh = state().shares.find((s) => s.id === rest.split('/')[0]);
   if (!sh || (sh.expiresAt && sh.expiresAt < now())) throw new HttpError(404, 'share not found or expired');
+  if (sh.disabled) throw new HttpError(410, 'share disabled');
   if (sh.password && (url.searchParams.get('p') ?? req.headers.get('X-Share-Password') ?? '') !== sh.password) {
     throw new HttpError(401, 'password required');
   }

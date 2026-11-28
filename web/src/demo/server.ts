@@ -1,5 +1,5 @@
 // 模拟 REST API v1: 路由与返回结构对齐 src/routes/api.ts, 数据落在浏览器本地
-import { delData, getData, newId, now, putData, save, sha256Hex, state } from './db';
+import { type DShare, delData, getData, newId, now, putData, save, sha256Hex, state } from './db';
 import { BASE, fileLink, json, serveNode, servePublicFile, serveShare, shareLink } from './serve';
 import {
   children, claimName, copy, getNode, HttpError, insert, maintenance, mkdirp, move, pathOf, publicNode, purge, resolvePath, restore, ROOT, trash, trashList,
@@ -256,16 +256,32 @@ on('POST', '/shares', 'read', async (c) => {
   const b = await c.body();
   const n = locate(b.id, b.path);
   const id = newId(10);
-  state().shares.unshift({ id, nodeId: n.id, password: str(b.password) ?? null, expiresAt: Number(b.expiresIn) ? now() + Number(b.expiresIn) * 1000 : null, createdAt: now() });
+  state().shares.unshift({ id, nodeId: n.id, password: str(b.password) ?? null, expiresAt: Number(b.expiresIn) ? now() + Number(b.expiresIn) * 1000 : null, createdAt: now(), remark: str(b.remark)?.trim().slice(0, 200) ?? null });
   return json(200, { id, url: shareLink(id) });
 });
 
 on('GET', '/shares', 'read', () => json(200, {
   items: state().shares.flatMap((s) => {
     const n = state().nodes[s.nodeId];
-    return n ? [{ id: s.id, node_id: s.nodeId, name: n.name, expires_at: s.expiresAt, created_at: s.createdAt, has_password: s.password ? 1 : 0 }] : [];
+    return n ? [shareRow(s, n.name)] : [];
   }),
 }));
+
+const shareRow = (s: DShare, name: string) => ({
+  id: s.id, node_id: s.nodeId, name, expires_at: s.expiresAt, created_at: s.createdAt, has_password: s.password ? 1 : 0, disabled: s.disabled ? 1 : 0, remark: s.remark ?? null,
+});
+
+// 编辑分享 (#22), 同 PATCH /shares/:id: 只改传了的字段
+on('PATCH', '/shares/([^/]+)', 'write', async (c, m) => {
+  const s = state().shares.find((x) => x.id === m[1]);
+  if (!s) throw new HttpError(404, 'share not found');
+  const b = await c.body();
+  if ('password' in b) s.password = str(b.password) ?? null;
+  if ('expiresIn' in b) s.expiresAt = Number(b.expiresIn) > 0 ? now() + Number(b.expiresIn) * 1000 : null;
+  if ('disabled' in b) s.disabled = !!b.disabled;
+  if ('remark' in b) s.remark = str(b.remark)?.trim().slice(0, 200) ?? null;
+  return json(200, { share: shareRow(s, state().nodes[s.nodeId]?.name ?? '') });
+});
 
 on('DELETE', '/shares/([^/]+)', 'write', (_c, m) => {
   state().shares = state().shares.filter((s) => s.id !== m[1]);

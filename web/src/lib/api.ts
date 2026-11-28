@@ -71,11 +71,14 @@ export const fs = {
   links: (ids: string[], expiresIn = 0) => api<{ items: { id: string; name: string; mime: string | null; url: string }[]; missing: string[] }>('POST', '/fs/links', { ids, expiresIn }),
 };
 
-export interface ShareRow { id: string; node_id: string; name: string; expires_at: number | null; created_at: number; has_password: number }
+export interface ShareRow { id: string; node_id: string; name: string; expires_at: number | null; created_at: number; has_password: number; disabled?: number; remark?: string | null }
+/** 编辑分享: 只传要改的字段。password: null 去掉密码; expiresIn: 秒, null 为永久 */
+export interface SharePatch { password?: string | null; expiresIn?: number | null; disabled?: boolean; remark?: string | null }
 export const shares = {
   list: () => api<{ items: ShareRow[] }>('GET', '/shares'),
   create: (id: string, password?: string, expiresIn?: number) => api<{ id: string; url: string }>('POST', '/shares', { id, password, expiresIn }),
   remove: (id: string) => api('DELETE', `/shares/${id}`),
+  update: (id: string, patch: SharePatch) => api<{ share: ShareRow }>('PATCH', `/shares/${id}`, patch),
 };
 
 export interface Stats {

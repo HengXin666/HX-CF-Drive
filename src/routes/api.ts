@@ -376,31 +376,65 @@ function renameRandom(name: string): string {
 // ---------------- 分享 ----------------
 
 api.post('/shares', requireScope('read'), async (c) => {
-  const b = await c.req.json<{ id?: string; path?: string; password?: string; expiresIn?: number }>();
+  const b = await c.req.json<{ id?: string; path?: string; password?: string; expiresIn?: number; remark?: string }>();
   const node = await locate(c, b.id, b.path);
   const id = newId(10);
-  await c.env.DB.prepare('INSERT INTO shares (id, node_id, password_hash, expires_at, created_at, token_id) VALUES (?, ?, ?, ?, ?, ?)')
-    .bind(id, node.id, b.password ? await sha256Hex(`${id}:${b.password}`): null, b.expiresIn ? now() + b.expiresIn * 1000 : null, now(), c.get('principal').id)
+  await c.env.DB.prepare('INSERT INTO shares (id, node_id, password_hash, expires_at, created_at, token_id, remark) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .bind(id, node.id, b.password ? await sha256Hex(`${id}:${b.password}`): null, b.expiresIn ? now() + b.expiresIn * 1000 : null, now(), c.get('principal').id, remarkOf(b.remark))
     .run();
   return c.json({ id, url: `${publicOrigin(c.env, c.req.url)}/s/${id}` });
 });
+
+const SHARE_COLS = 's.id, s.node_id, s.expires_at, s.created_at, s.disabled, s.remark, n.name, (s.password_hash IS NOT NULL) AS has_password';
+const remarkOf = (r: unknown) => (typeof r === 'string' && r.trim() ? r.trim().slice(0, 200) : null);
 
 /** 分享列表按令牌范围隔离: 受限令牌只看得到自己根目录下的分享 (分享 id 就是公开访问凭证, 不能泄露给别的令牌) */
 api.get('/shares', requireScope('read'), async (c) => {
   const p = c.get('principal');
   if (p.rootId === 'root') {
     const r = await c.env.DB.prepare(
-      'SELECT s.id, s.node_id, s.expires_at, s.created_at, n.name, (s.password_hash IS NOT NULL) AS has_password FROM shares s JOIN nodes n ON n.id = s.node_id ORDER BY s.created_at DESC LIMIT 200',
+      `SELECT ${SHARE_COLS} FROM shares s JOIN nodes n ON n.id = s.node_id ORDER BY s.created_at DESC LIMIT 200`,
     ).all();
     return c.json({ items: r.results });
   }
   const r = await c.env.DB.prepare(
     `WITH RECURSIVE sub(id) AS (
        SELECT ?1 UNION ALL SELECT n.id FROM nodes n JOIN sub ON n.parent_id = sub.id WHERE n.deleted_at IS NULL LIMIT 20000
-     ) SELECT s.id, s.node_id, s.expires_at, s.created_at, n.name, (s.password_hash IS NOT NULL) AS has_password
+     ) SELECT ${SHARE_COLS}
        FROM shares s JOIN sub ON sub.id = s.node_id JOIN nodes n ON n.id = s.node_id ORDER BY s.created_at DESC LIMIT 200`,
   ).bind(p.rootId).all();
   return c.json({ items: r.results });
+});
+
+/**
+ * 编辑分享 (#22): 只改传了的字段。password: 字符串设新密码, null 或 '' 去掉密码 (都会清掉错误计数和锁, 旧 Cookie 随之失效);
+ * expiresIn: 秒数从现在起算, null 或 0 为永久; disabled: 停用后访问返回 410; remark: 备注 (≤ 200 字)。
+ * 读 1 行 + 权限 1 条查询, 写 1 行。
+ */
+api.patch('/shares/:id', requireScope('write'), async (c) => {
+  const id = c.req.param('id')!;
+  const s = await c.env.DB.prepare('SELECT node_id FROM shares WHERE id = ?').bind(id).first<{ node_id: string }>();
+  if (!s) throw new HttpError(404, 'share not found');
+  await assertAccess(c.env, c.get('principal'), s.node_id);
+  const b = await c.req.json<{ password?: string | null; expiresIn?: number | null; disabled?: boolean; remark?: string | null }>();
+  const sets: string[] = [];
+  const args: unknown[] = [];
+  if (b.password !== undefined) {
+    sets.push('password_hash = ?', 'fails = 0', 'locked_until = NULL');
+    args.push(b.password ? await sha256Hex(`${id}:${b.password}`) : null);
+  }
+  if (b.expiresIn !== undefined) {
+    const sec = Number(b.expiresIn) || 0;
+    if (sec < 0) throw new HttpError(400, 'bad expiresIn');
+    sets.push('expires_at = ?');
+    args.push(sec ? now() + sec * 1000 : null);
+  }
+  if (b.disabled !== undefined) { sets.push('disabled = ?'); args.push(b.disabled ? 1 : 0); }
+  if (b.remark !== undefined) { sets.push('remark = ?'); args.push(remarkOf(b.remark)); }
+  if (!sets.length) throw new HttpError(400, 'nothing to update');
+  await c.env.DB.prepare(`UPDATE shares SET ${sets.join(', ')} WHERE id = ?`).bind(...args, id).run();
+  const row = await c.env.DB.prepare(`SELECT ${SHARE_COLS} FROM shares s JOIN nodes n ON n.id = s.node_id WHERE s.id = ?`).bind(id).first();
+  return c.json({ share: row });
 });
 
 api.delete('/shares/:id', requireScope('write'), async (c) => {

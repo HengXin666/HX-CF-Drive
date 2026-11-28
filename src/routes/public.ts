@@ -42,11 +42,13 @@ const SHARE_LOCK_MS = 15 * 60_000;
 // 分享页输对密码后发的 Cookie: 只对这个分享的路径有效, 1 天; 值是 HMAC, 改了密码或撤销分享即失效
 const SHARE_COOKIE_SEC = 86_400;
 
-interface ShareRow { id: string; node_id: string; password_hash: string | null; expires_at: number | null; fails: number; locked_until: number | null }
+interface ShareRow { id: string; node_id: string; password_hash: string | null; expires_at: number | null; fails: number; locked_until: number | null; disabled: number }
 
 async function loadShare(env: Env, id: string): Promise<ShareRow> {
   const share = await env.DB.prepare('SELECT * FROM shares WHERE id = ?').bind(id).first<ShareRow>();
   if (!share || (share.expires_at && share.expires_at < Date.now())) throw new HttpError(404, 'share not found or expired');
+  // 停用的分享 (#22) 和撤销一样打不开, 但保留记录, 可以再启用
+  if (share.disabled) throw new HttpError(410, 'share disabled');
   return share;
 }
 
@@ -88,6 +90,7 @@ function errorAsPage(e: HttpError, id: string, path: string, pwGiven: boolean): 
   if (e.status === 401) return page(passwordPage(id, path, { wrong: pwGiven }), 401);
   if (e.status === 429) return page(passwordPage(id, path, { locked: Number(e.headers?.['Retry-After'] ?? 60) }), 429, e.headers);
   if (e.status === 404) return page(errorPage('分享不存在', '链接可能已过期, 被撤销, 或文件已被删除。'), 404);
+  if (e.status === 410) return page(errorPage('分享已停用', '分享者暂时停用了这个链接。'), 410);
   return page(errorPage('打不开这个分享', e.message), e.status);
 }
 

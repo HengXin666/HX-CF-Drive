@@ -49,8 +49,9 @@ export const GROUPS: Group[] = [
   {
     id: 'share', title: '分享',
     items: [
-      { method: 'POST', path: '/api/v1/shares', scope: 'read', desc: '创建分享, 密码和有效期可选', body: '{"path":"/a.zip","password":"1234","expiresIn":604800}', resp: '{"id":"...","url":"https://.../s/<id>"}' },
-      { method: 'GET', path: '/api/v1/shares', scope: 'read', desc: '分享列表' },
+      { method: 'POST', path: '/api/v1/shares', scope: 'read', desc: '创建分享, 密码, 有效期, 备注可选', body: '{"path":"/a.zip","password":"1234","expiresIn":604800,"remark":"给小明"}', resp: '{"id":"...","url":"https://.../s/<id>"}' },
+      { method: 'GET', path: '/api/v1/shares', scope: 'read', desc: '分享列表 (含 has_password, expires_at, disabled, remark)' },
+      { method: 'PATCH', path: '/api/v1/shares/<id>', scope: 'write', desc: '编辑分享, 只改传了的字段: password (null 去掉), expiresIn (秒, 从现在起; null 为永久), disabled (停用后访问返回 410), remark。改密码后旧的密码 Cookie 失效', body: '{"disabled":false,"password":"new","expiresIn":259200,"remark":"给同事"}', resp: '{"share":{...}}' },
       { method: 'DELETE', path: '/api/v1/shares/<id>', scope: 'write', desc: '撤销分享' },
     ],
   },
