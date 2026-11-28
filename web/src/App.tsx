@@ -2,7 +2,7 @@
 import { File, HardDrive, Send } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { Shell, type NavItem } from './components/Shell';
-import { admin, auth, fmtSize, type Stats } from './lib/api';
+import { admin, ApiError, auth, fmtSize, me, type Stats } from './lib/api';
 import { clearImages } from './lib/imgcache';
 import { Admin } from './pages/Admin';
 import { ApiDocs } from './pages/ApiDocs';
@@ -25,12 +25,25 @@ function useHash(): [string, (h: string) => void] {
 export function App() {
   const [authed, setAuthed] = useState(!!auth.get());
   const [stats, setStats] = useState<Stats | null>(null);
+  const [scopes, setScopes] = useState<string[] | null>(null);
   const [hash, nav] = useHash();
 
-  const refreshStats = useCallback(() => {
-    admin.stats().then(setStats, () => setStats(null));
-  }, []);
-  useEffect(() => { if (authed) refreshStats(); }, [authed, refreshStats]);
+  // 先问自己有什么权限, 有 admin / stats 才拉用量 (统计是维护任务写的快照, 只在打开页面和后台操作后刷新)
+  useEffect(() => {
+    if (!authed) { setScopes(null); setStats(null); return; }
+    let dead = false;
+    me().then((m) => {
+      if (dead) return;
+      setScopes(m.scopes);
+      if (m.scopes.includes('admin') || m.scopes.includes('stats')) admin.stats().then((s) => { if (!dead) setStats(s); }, () => {});
+    }, (e) => {
+      if (dead) return;
+      // 令牌已失效: 回到登录页
+      if (e instanceof ApiError && e.status === 401) { auth.clear(); setAuthed(false); }
+      else setScopes([]);
+    });
+    return () => { dead = true; };
+  }, [authed]);
 
   const go = useCallback((p: string) => nav('/files' + (p.startsWith('/') ? p : '/' + p)), [nav]);
 
@@ -38,7 +51,7 @@ export function App() {
 
   const page = hash.split('/')[1] || 'files';
   const filePath = decodeURIComponent(hash.replace(/^\/files/, '')) || '/';
-  const isAdmin = !!stats;
+  const isAdmin = !!scopes?.includes('admin');
   const items: NavItem[] = [
     { id: 'files', label: '文件', hint: 'files', icon: 'files', group: '网盘' },
     { id: 'shares', label: '分享', hint: 'shares', icon: 'share', group: '网盘' },
@@ -69,7 +82,7 @@ export function App() {
       )}
     >
       {page === 'trash' ? <Trash /> : page === 'shares' ? <Shares /> : page === 'docs' ? <ApiDocs />
-        : page === 'admin' && isAdmin ? <Admin onChange={refreshStats} /> : <Files path={filePath} go={go} onChange={refreshStats} />}
+        : page === 'admin' && isAdmin ? <Admin onStats={setStats} /> : <Files path={filePath} go={go} isAdmin={isAdmin} />}
     </Shell>
   );
 }

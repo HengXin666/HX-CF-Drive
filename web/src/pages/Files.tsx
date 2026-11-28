@@ -62,7 +62,7 @@ function Crumbs({ path, go }: { path: string; go: (p: string) => void }) {
 
 type Item = Node & { fullPath: string };
 
-export function Files({ path, go, onChange }: { path: string; go: (p: string) => void; onChange: () => void }) {
+export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => void; isAdmin: boolean }) {
   const [rows, setRows] = useState<Node[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState('');
@@ -75,9 +75,9 @@ export function Files({ path, go, onChange }: { path: string; go: (p: string) =>
   const rowMenu = useContextMenu<Node>();
   const blankMenu = useContextMenu<null>();
   const picker = useRef<HTMLInputElement>(null);
-  // 只有管理员能列令牌; 其他令牌拿不到就当没有
+  // 只有管理员能列令牌; 不是管理员就不发这个必然 403 的请求
   const [tokens, setTokens] = useState<TokenRow[]>([]);
-  useEffect(() => { admin.tokens().then((r) => setTokens(r.items), () => setTokens([])); }, []);
+  useEffect(() => { if (isAdmin) admin.tokens().then((r) => setTokens(r.items), () => setTokens([])); }, [isAdmin]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -92,7 +92,8 @@ export function Files({ path, go, onChange }: { path: string; go: (p: string) =>
   }, [path, go]);
 
   useEffect(() => { setSearching(null); setQ(''); void load(); }, [load]);
-  const changed = useCallback(() => { void load(); onChange(); }, [load, onChange]);
+  // 用量统计是维护任务写的快照, 文件操作和上传不会让它马上变, 所以这里不再刷新侧栏 (以前每传完一个文件就全表扫一次 nodes + blobs)
+  const changed = useCallback(() => { void load(); }, [load]);
   const uploads = useUploadQueue(changed);
 
   const runSearch = async () => {

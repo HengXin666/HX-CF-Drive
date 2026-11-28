@@ -62,6 +62,8 @@ export const shares = {
 export interface Stats {
   nodes: { kind: string; n: number }[];
   blobs: { n: number; bytes: number };
+  /** 节点数与字节数的统计时间: 维护任务每 6 小时重算一次快照 */
+  snapshotAt?: number;
   bots: { id: string; username: string | null; status: string; last_error: string | null }[];
   channels: { id: string; title: string; status: string }[];
 }
@@ -75,6 +77,10 @@ export interface Topology {
   perms: Record<string, string>;
 }
 export interface TokenRow { id: string; name: string; scopes: string; root_id: string; root_path: string; expires_at: number | null; created_at: number }
+export interface Me { scopes: string[]; rootId: string }
+/** 当前令牌的权限: 不是管理员就不请求管理接口 */
+export const me = () => api<Me>('GET', '/me');
+
 export const admin = {
   stats: () => api<Stats>('GET', '/admin/stats'),
   addBot: (token: string) => api<{ username: string; channels: Record<string, string> }>('POST', '/admin/bots', { token }),

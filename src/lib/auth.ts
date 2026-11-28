@@ -40,8 +40,8 @@ export async function resolvePrincipal(env: Env, token: string | null): Promise<
   return { id: row.id, scopes: new Set(row.scopes.split(',').map((s) => s.trim())), rootId: row.root_id };
 }
 
-/** 中间件: 要求某个权限 */
-export function requireScope(scope: 'read' | 'write' | 'admin' | 'stats') {
+/** 中间件: 要求某个权限; 不传 scope 时只要令牌有效 */
+export function requireScope(scope?: 'read' | 'write' | 'admin' | 'stats') {
   return async (c: Context<AppEnv>, next: Next) => {
     let p = c.get('principal');
     if (!p) {
@@ -53,7 +53,7 @@ export function requireScope(scope: 'read' | 'write' | 'admin' | 'stats') {
       p = await narrowScope(c.env, found, c.req.header(SCOPE_HEADER));
       c.set('principal', p);
     }
-    if (!p.scopes.has(scope) && !p.scopes.has('admin')) throw new HttpError(403, `missing scope: ${scope}`);
+    if (scope && !p.scopes.has(scope) && !p.scopes.has('admin')) throw new HttpError(403, `missing scope: ${scope}`);
     await next();
   };
 }

@@ -11,6 +11,7 @@ import {
 } from '../lib/tree';
 import { HttpError, newId, now, sha256Hex } from '../lib/util';
 import { runMaintenance } from '../services/maintenance';
+import { cachedStats, invalidateStats, liveUsage, putStats, STAT_KEYS, usageFromCounters } from '../services/stats';
 import { ensureParts, loadBlob, serveNode } from '../services/serve';
 import { commitUpload, foldReceipts, initUpload, openTicket, openTicketBare, putChunk, uploadStream } from '../services/upload';
 import { trash } from './trash';
@@ -311,24 +312,37 @@ api.delete('/shares/:id', requireScope('write'), async (c) => {
 
 // ---------------- 管理 ----------------
 
-/** 用量与健康。`stats` scope 只读这一个接口, 给别的服务 (如 AIOA 额度页) 用, 不必发管理员令牌 */
+/** 用量与健康。`stats` scope 只读这一个接口, 给别的服务 (如 AIOA 额度页) 用, 不必发管理员令牌。
+ * 节点数和总字节数读维护任务写的快照 (见 services/stats.ts), 不再每次全表扫描 */
 api.get('/admin/stats', requireScope('stats'), async (c) => {
-  const [nodes, blobs, bots, channels, counters] = await c.env.DB.batch([
-    c.env.DB.prepare('SELECT kind, COUNT(*) AS n FROM nodes WHERE deleted_at IS NULL GROUP BY kind'),
-    c.env.DB.prepare('SELECT COUNT(*) AS n, COALESCE(SUM(size),0) AS bytes FROM blobs'),
+  const isAdmin = c.get('principal').scopes.has('admin');
+  const hit = cachedStats(isAdmin);
+  if (hit) return c.json(hit);
+  const [bots, channels, counters] = await c.env.DB.batch([
     c.env.DB.prepare('SELECT id, username, status, last_error FROM bots'),
     c.env.DB.prepare('SELECT * FROM channels'),
     c.env.DB.prepare('SELECT name, n FROM counters'),
   ]);
-  const isAdmin = c.get('principal').scopes.has('admin');
-  return c.json({
-    nodes: nodes.results,
-    blobs: blobs.results[0],
+  const all = Object.fromEntries((counters.results as { name: string; n: number }[]).map((r) => [r.name, r.n]));
+  const usage = usageFromCounters(all) ?? (await liveUsage(c.env));
+  const body = {
+    nodes: usage.nodes,
+    blobs: usage.blobs,
+    /** 统计时间 (毫秒)。最多滞后一个维护周期 (6 小时) */
+    snapshotAt: usage.at,
     // Bot 的报错和频道细节只给管理员
     bots: isAdmin ? bots.results : (bots.results as { status: string }[]).map((b) => ({ status: b.status })),
     channels: isAdmin ? channels.results : channels.results.length,
-    counters: Object.fromEntries((counters.results as { name: string; n: number }[]).map((r) => [r.name, r.n])),
-  });
+    counters: Object.fromEntries(Object.entries(all).filter(([k]) => !(STAT_KEYS as readonly string[]).includes(k))),
+  };
+  putStats(isAdmin, body);
+  return c.json(body);
+});
+
+/** 当前令牌的权限与根目录。前端据此决定要不要请求管理接口 (不是管理员就不发, 省一个必然 403 的请求) */
+api.get('/me', requireScope(), (c) => {
+  const p = c.get('principal');
+  return c.json({ scopes: [...p.scopes], rootId: p.rootId });
 });
 
 api.post('/admin/bots', requireScope('admin'), async (c) => {
@@ -338,6 +352,7 @@ api.post('/admin/bots', requireScope('admin'), async (c) => {
     .bind(String(me.id), token, me.username, 'active', now())
     .run();
   invalidateBotCache();
+  invalidateStats();
   // 检查它在每个频道里是不是管理员
   const check: Record<string, string> = {};
   for (const ch of await activeChannels(c.env)) check[ch] = await adminStatus(token, ch, me.id);
@@ -349,6 +364,7 @@ api.delete('/admin/bots/:id', requireScope('admin'), async (c) => {
   const sql = c.req.query('force') === '1' ? 'DELETE FROM bots WHERE id = ?' : "UPDATE bots SET status = 'dead' WHERE id = ?";
   await c.env.DB.prepare(sql).bind(c.req.param('id')).run();
   invalidateBotCache();
+  invalidateStats();
   return c.json({ ok: true });
 });
 
@@ -363,6 +379,7 @@ api.post('/admin/channels', requireScope('admin'), async (c) => {
   for (const b of bots) check[b.username ?? b.id] = await adminStatus(b.token, id, Number(b.id));
   await c.env.DB.prepare('INSERT OR REPLACE INTO channels (id, title, status, created_at) VALUES (?, ?, ?, ?)').bind(id, chat.title ?? '', 'active', now()).run();
   invalidateChannelCache();
+  invalidateStats();
   return c.json({ id, title: chat.title, bots: check });
 });
 
@@ -370,6 +387,7 @@ api.patch('/admin/channels/:id', requireScope('admin'), async (c) => {
   const { status } = await c.req.json<{ status: 'active' | 'readonly' | 'dead' }>();
   await c.env.DB.prepare('UPDATE channels SET status = ? WHERE id = ?').bind(status, c.req.param('id')).run();
   invalidateChannelCache();
+  invalidateStats();
   return c.json({ ok: true });
 });
 

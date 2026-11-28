@@ -234,10 +234,14 @@ on('GET', '/admin/stats', 'admin', () => {
   return json(200, {
     nodes: (['dir', 'file'] as const).map((kind) => ({ kind, n: alive.filter((n) => n.kind === kind).length })),
     blobs: { n: blobs.length, bytes: blobs.reduce((a, b) => a + b.size, 0) },
+    snapshotAt: now(),
     bots: s.bots,
     channels: s.channels,
   });
 });
+
+// 演示层的 /me: 返回当前令牌的权限 (scope 写 read, 只要令牌有效)
+on('GET', '/me', 'read', ({ scopes }) => json(200, { scopes, rootId: ROOT }));
 
 // 演示数据没有真实分片清单: 按 blob id 哈希把分片分给 Bot 和频道, 只为让拓扑图有东西可看
 on('GET', '/admin/topology', 'admin', (c) => {

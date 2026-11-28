@@ -28,7 +28,8 @@ function Stat({ icon, label, value, hint }: { icon: IconName; label: string; val
   );
 }
 
-export function Admin({ onChange }: { onChange: () => void }) {
+/** onStats: 把这里拉到的用量交给侧栏, 不再让侧栏另发一次 /admin/stats */
+export function Admin({ onStats }: { onStats: (s: Stats) => void }) {
   const [stats, setStats] = useState<Stats | null>(null);
   const [tokens, setTokens] = useState<TokenRow[]>([]);
   const [prompt, setPrompt] = useState<PromptRequest | null>(null);
@@ -39,11 +40,11 @@ export function Admin({ onChange }: { onChange: () => void }) {
       const [s, t] = await Promise.all([admin.stats(), admin.tokens()]);
       setStats(s);
       setTokens(t.items);
-      onChange();
+      onStats(s);
     } catch (e) {
       toast.error((e as Error).message);
     }
-  }, [onChange]);
+  }, [onStats]);
   useEffect(() => { void load(); }, [load]);
 
   const run = async (fn: () => Promise<unknown>, ok: string) => {
@@ -103,7 +104,7 @@ export function Admin({ onChange }: { onChange: () => void }) {
       <div className="grid grid-cols-2 gap-2 md:gap-3 lg:grid-cols-4">
         <Stat icon="fileText" label="文件" value={count('file')} />
         <Stat icon="folder" label="目录" value={count('dir')} />
-        <Stat icon="database" label="去重后占用" value={fmtSize(stats?.blobs.bytes ?? 0)} hint={`${stats?.blobs.n ?? 0} 个数据块`} />
+        <Stat icon="database" label="去重后占用" value={fmtSize(stats?.blobs.bytes ?? 0)} hint={`${stats?.blobs.n ?? 0} 个数据块${stats?.snapshotAt ? ` · 统计于 ${fmtTime(stats.snapshotAt)}` : ''}`} />
         <Stat icon="plane" label="可用 Bot" value={stats?.bots.filter((b) => b.status === 'active').length ?? 0} />
       </div>
       {/* Bot 或频道变了就重新拉拓扑 */}
