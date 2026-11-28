@@ -72,6 +72,7 @@ src/
   routes/api.ts              REST API
   routes/dav.ts              WebDAV
   routes/public.ts           签名直链与分享
+  routes/sharePage.ts        分享链接的浏览器页面
   services/upload.ts         无状态分片上传 (签名凭证 + 回执)
   services/serve.ts          读取与流式拼接
   services/maintenance.ts    定时维护
@@ -223,6 +224,12 @@ node scripts/e2e.mjs             # 端到端冒烟
 - 多频道冗余写会让上传的 TG 调用和 manifest 翻倍, 目前不做。
 
 ## 📝 更新记录
+
+**v0.4.0**
+
+- 分片只凭票据直传: `PUT /api/v1/uploads/chunk` 不带 `Authorization` 时只凭上传票据 (HMAC 签名, 24 小时到期, 签发令牌被吊销即作废); `/api/v1/uploads` 返回公网分片地址 `chunkUrl`, 服务端申请上传后让手机或浏览器直接把字节传给 Drive (#16)
+- 分享页: 浏览器打开 `/s/:id` 时返回页面, 有密码输入, 文件夹列表 (面包屑, 子目录), 下载按钮, 亮暗跟随系统; 页面不执行脚本, 不加载外部资源。curl, App, 播放器等非浏览器请求以及 `?download=1` / `?raw=1` 行为不变 (#16)
+- 补上 10 GB 级 (540 片, 3 段) fold + commit 的测试, 文档写明超过 256 片必须按组 fold (#16)
 
 **v0.3.1** (迁移 0004)
 

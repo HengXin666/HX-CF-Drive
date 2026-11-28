@@ -11,6 +11,7 @@ import { chunkSizeOf } from '../env';
 import {
   activeChannels, coolDown, markDead, pickBot, pickChannel, sendChunkStream, TgFatal, TgRateLimit, usableBots,
 } from '../drivers/tg';
+import { tokenAlive } from '../lib/auth';
 import { openJson, sealJson } from '../lib/sign';
 import { assertAccess, childByName, getNode, type NodeRow, trashNode } from '../lib/tree';
 import { cleanMime, HttpError, newId, now, validName } from '../lib/util';
@@ -141,9 +142,25 @@ export async function blobVisible(env: Env, rootId: string, blobId: string): Pro
 }
 
 export async function openTicket(env: Env, p: Principal, sealed: string): Promise<Ticket> {
+  const t = await verifyTicket(env, sealed);
+  if (t.u !== p.id) throw new HttpError(403, 'ticket belongs to another token');
+  return t;
+}
+
+async function verifyTicket(env: Env, sealed: string): Promise<Ticket> {
   const t = await openJson<Ticket>(env.SIGNING_KEY, TICKET, sealed);
   if (!t || t.x < now() / 1000) throw new HttpError(400, 'bad or expired upload ticket');
-  if (t.u !== p.id) throw new HttpError(403, 'ticket belongs to another token');
+  return t;
+}
+
+/**
+ * 只凭票据传分片 (不带 Authorization): 票据本身是 HMAC 签过的 24 小时凭证, 只能往这一个上传里写字节,
+ * 不能 commit (commit 仍要令牌)。签发它的令牌被吊销或过期后立即作废 (tokenAlive 60 秒缓存)。
+ * 给手机这类不该持有 Drive 令牌的客户端直传用, 见 docs/INTEGRATION.md。
+ */
+export async function openTicketBare(env: Env, sealed: string): Promise<Ticket> {
+  const t = await verifyTicket(env, sealed);
+  if (!(await tokenAlive(env, t.u))) throw new HttpError(403, 'ticket token revoked');
   return t;
 }
 
