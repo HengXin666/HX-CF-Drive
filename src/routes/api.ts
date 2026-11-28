@@ -373,6 +373,54 @@ api.patch('/admin/channels/:id', requireScope('admin'), async (c) => {
   return c.json({ ok: true });
 });
 
+/**
+ * Bot 与频道的拓扑 (后台 SVG 图用)。
+ * 上传时 Bot 和频道各自按哈希从池里选, 任何可用 Bot 都可能写任何 active 频道, 所以连线就是 Bot 池 x 频道池;
+ * 这里补上每条线实际存了多少分片 (从清单里数), 以及 ?check=1 时每对的管理员权限。
+ * 分片统计扫全部清单, isolate 内缓存 10 分钟; 权限检查每对 1 次 getChatMember, 受 SUBREQ_BUDGET 限制, 超出的标为 unchecked。
+ */
+type Usage = { c: string; b: string; n: number; bytes: number };
+let topoCache: { at: number; usage: Usage[] } | null = null;
+
+api.get('/admin/topology', requireScope('admin'), async (c) => {
+  const [bots, channels] = await c.env.DB.batch([
+    c.env.DB.prepare('SELECT id, token, username, status FROM bots ORDER BY created_at'),
+    c.env.DB.prepare('SELECT id, title, status FROM channels ORDER BY created_at'),
+  ]);
+  const fresh = c.req.query('fresh') === '1';
+  if (fresh || !topoCache || now() - topoCache.at > 600_000) {
+    // 整份清单 (数组) 在 blobs.manifest, 分段清单在 blob_parts.refs; 两处的元素都是 {c,m,b,f,s}
+    const r = await c.env.DB.prepare(
+      `SELECT json_extract(j.value, '$.c') AS c, json_extract(j.value, '$.b') AS b, COUNT(*) AS n, SUM(json_extract(j.value, '$.s')) AS bytes
+       FROM (SELECT manifest AS m FROM blobs WHERE json_type(manifest) = 'array' UNION ALL SELECT refs AS m FROM blob_parts) t, json_each(t.m) j
+       GROUP BY 1, 2`,
+    ).all<Usage>();
+    topoCache = { at: now(), usage: r.results.map((u) => ({ c: String(u.c), b: String(u.b), n: u.n, bytes: u.bytes ?? 0 })) };
+  }
+  const botRows = bots.results as { id: string; token: string; username: string | null; status: string }[];
+  const chanRows = channels.results as { id: string; title: string | null; status: string }[];
+  const perms: Record<string, string> = {};
+  if (c.req.query('check') === '1') {
+    let budget = num(c.env.SUBREQ_BUDGET, 48);
+    const jobs: Promise<void>[] = [];
+    for (const b of botRows.filter((x) => x.status === 'active')) {
+      for (const ch of chanRows.filter((x) => x.status !== 'dead')) {
+        const k = `${b.id}|${ch.id}`;
+        if (budget-- <= 0) { perms[k] = 'unchecked'; continue; }
+        jobs.push(adminStatus(b.token, ch.id, Number(b.id)).then((s) => { perms[k] = s; }));
+      }
+    }
+    await Promise.all(jobs);
+  }
+  return c.json({
+    at: topoCache.at,
+    bots: botRows.map(({ token: _t, ...b }) => b),
+    channels: chanRows,
+    usage: topoCache.usage,
+    perms,
+  });
+});
+
 async function adminStatus(token: string, chatId: string, botId: number): Promise<string> {
   try {
     const m = await tgCall<{ status: string; can_post_messages?: boolean; can_delete_messages?: boolean }>(token, 'getChatMember', { chat_id: chatId, user_id: botId });

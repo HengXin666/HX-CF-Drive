@@ -71,6 +71,7 @@ export const GROUPS: Group[] = [
       { method: 'POST', path: '/api/v1/admin/tokens', scope: 'admin', desc: '签发 API 令牌, 明文只返回一次', body: '{"name":"picgo","scopes":["read","write"],"rootPath":"/picgo","expiresIn":31536000}', resp: '{"token":"hxd_..."}' },
       { method: 'GET', path: '/api/v1/admin/tokens', scope: 'admin', desc: '令牌列表' },
       { method: 'DELETE', path: '/api/v1/admin/tokens/<id>', scope: 'admin', desc: '吊销令牌' },
+      { method: 'GET', path: '/api/v1/admin/topology?check=0&fresh=0', scope: 'admin', desc: 'Bot 与频道拓扑: 每对存了多少分片 (统计缓存 10 分钟, fresh=1 重算); check=1 时逐对检查管理员权限 (每对 1 次 TG 调用, 受 SUBREQ_BUDGET 限制)', resp: '{"bots":[...],"channels":[...],"usage":[{"c":"-100...","b":"7123...","n":251,"bytes":4831838208}],"perms":{"7123...|-100...":"ok"}}' },
       { method: 'POST', path: '/api/v1/admin/maintenance', scope: 'admin', desc: '立即执行清理 (回收站过期, 孤儿数据)' },
     ],
   },

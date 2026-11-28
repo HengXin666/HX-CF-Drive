@@ -4,6 +4,7 @@ import { Icon, IconButton } from '../components/Icon';
 import { PromptDialog, type PromptRequest } from '../components/PromptDialog';
 import { Meta, Page } from '../components/Shell';
 import { type Column, DataTable } from '../components/Table';
+import { Topology } from '../components/Topology';
 import type { IconName } from '../icons';
 import { admin, fmtSize, fmtTime, type Stats, type TokenRow } from '../lib/api';
 import { Badge, Button, Card, toast } from '../ui';
@@ -105,6 +106,8 @@ export function Admin({ onChange }: { onChange: () => void }) {
         <Stat icon="database" label="去重后占用" value={fmtSize(stats?.blobs.bytes ?? 0)} hint={`${stats?.blobs.n ?? 0} 个数据块`} />
         <Stat icon="plane" label="可用 Bot" value={stats?.bots.filter((b) => b.status === 'active').length ?? 0} />
       </div>
+      {/* Bot 或频道变了就重新拉拓扑 */}
+      <Topology key={[...(stats?.bots ?? []), ...(stats?.channels ?? [])].map((x) => `${x.id}:${x.status}`).join(',')} />
       <DataTable
         title="Telegram 频道"
         description="文件分片存在这些频道里; 只读的频道不再写入新分片。"

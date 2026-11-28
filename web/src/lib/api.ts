@@ -65,6 +65,15 @@ export interface Stats {
   bots: { id: string; username: string | null; status: string; last_error: string | null }[];
   channels: { id: string; title: string; status: string }[];
 }
+export interface Topology {
+  at: number;
+  bots: { id: string; username: string | null; status: string }[];
+  channels: { id: string; title: string | null; status: string }[];
+  /** 每对 (频道 c, Bot b) 上存了多少分片 */
+  usage: { c: string; b: string; n: number; bytes: number }[];
+  /** key 为 `${botId}|${channelId}`, 值为 ok / NOT ADMIN ... / unchecked */
+  perms: Record<string, string>;
+}
 export interface TokenRow { id: string; name: string; scopes: string; root_id: string; root_path: string; expires_at: number | null; created_at: number }
 export const admin = {
   stats: () => api<Stats>('GET', '/admin/stats'),
@@ -76,6 +85,8 @@ export const admin = {
   addToken: (name: string, scopes: string[], rootPath: string) => api<{ token: string }>('POST', '/admin/tokens', { name, scopes, rootPath }),
   removeToken: (id: string) => api('DELETE', `/admin/tokens/${id}`),
   maintenance: () => api<Record<string, number>>('POST', '/admin/maintenance'),
+  /** check=true 时逐对检查 Bot 在频道里的管理员权限 (花 TG 子请求); fresh=true 时重新统计分片 */
+  topology: (check = false, fresh = false) => api<Topology>('GET', `/admin/topology?check=${check ? 1 : 0}&fresh=${fresh ? 1 : 0}`),
 };
 
 export function fmtSize(n: number): string {

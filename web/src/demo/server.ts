@@ -239,6 +239,29 @@ on('GET', '/admin/stats', 'admin', () => {
   });
 });
 
+// 演示数据没有真实分片清单: 按 blob id 哈希把分片分给 Bot 和频道, 只为让拓扑图有东西可看
+on('GET', '/admin/topology', 'admin', (c) => {
+  const s = state();
+  const h = (x: string) => [...x].reduce((a, ch) => (a * 31 + ch.charCodeAt(0)) >>> 0, 0);
+  const bots = s.bots.filter((b) => b.status === 'active');
+  const usage = new Map<string, { c: string; b: string; n: number; bytes: number }>();
+  for (const blob of Object.values(s.blobs)) {
+    if (!bots.length || !s.channels.length) break;
+    const ch = s.channels[h(blob.id) % s.channels.length].id;
+    const n = Math.max(1, Math.ceil(blob.size / (19 * 1024 * 1024)));
+    for (let i = 0; i < n; i++) {
+      const b = bots[h(blob.id + i) % bots.length].id;
+      const u = usage.get(`${b}|${ch}`) ?? { c: ch, b, n: 0, bytes: 0 };
+      u.n++;
+      u.bytes += i < n - 1 ? 19 * 1024 * 1024 : blob.size - (n - 1) * 19 * 1024 * 1024;
+      usage.set(`${b}|${ch}`, u);
+    }
+  }
+  const perms: Record<string, string> = {};
+  if (c.url.searchParams.get('check') === '1') for (const b of bots) for (const ch of s.channels) if (ch.status !== 'dead') perms[`${b.id}|${ch.id}`] = 'ok';
+  return json(200, { at: now(), bots: s.bots, channels: s.channels, usage: [...usage.values()], perms });
+});
+
 const adminCheck = () => Object.fromEntries(state().channels.filter((c) => c.status === 'active').map((c) => [c.id, 'ok']));
 
 on('POST', '/admin/bots', 'admin', async (c) => {
