@@ -27,7 +27,7 @@ app.use(
   '/api/*',
   cors({
     origin: '*',
-    allowHeaders: ['Authorization', 'Content-Type', 'Range', 'If-Range', 'X-Share-Password'],
+    allowHeaders: ['Authorization', 'Content-Type', 'Range', 'If-Range', 'X-Share-Password', 'X-Drive-Scope'],
     allowMethods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     exposeHeaders: ['Content-Range', 'Content-Length', 'ETag', 'Retry-After', 'X-Request-Id'],
     maxAge: 86400,

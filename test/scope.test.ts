@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { narrowScope } from '../src/lib/auth';
 
-type Row = { id: string; parent_id: string | null; name: string; kind: string; deleted_at: null };
+type Row = { id: string; parent_id: string | null; name: string; kind: string; deleted_at: number | null };
 
 /** 只认 walkPath 与 mkdirp 的假 D1: nodes 是一棵小树 */
 function fakeEnv(rows: Row[]) {
@@ -10,13 +10,14 @@ function fakeEnv(rows: Row[]) {
     all: async () => {
       const [rootId, segsJson] = args as [string, string];
       const segs = JSON.parse(segsJson) as string[];
-      let cur = rows.find((r) => r.id === rootId);
+      const live = rows.filter((r) => r.deleted_at === null);
+      let cur = live.find((r) => r.id === rootId);
       const out: Row[] = [];
       for (let d = 0; cur; d++) {
         out.push(cur);
         if (d >= segs.length || cur.kind !== 'dir') break;
         const parent: Row = cur;
-        cur = rows.find((r) => r.parent_id === parent.id && r.name === segs[d]);
+        cur = live.find((r) => r.parent_id === parent.id && r.name === segs[d]);
       }
       return { results: out };
     },
@@ -58,5 +59,11 @@ describe('X-Drive-Scope 收窄根目录', () => {
   it('不是目录或不以 / 开头: 拒绝', async () => {
     await expect(narrowScope(fakeEnv(base()), who(['read']), '/a.txt')).rejects.toThrow(/not a dir/);
     await expect(narrowScope(fakeEnv(base()), who(['read']), 'drive')).rejects.toThrow(/bad scope/);
+    await expect(narrowScope(fakeEnv(base()), who(['read']), '/100%')).rejects.toThrow(/bad scope/);
+  });
+  it('目录在回收站里: 只读 404, 可写时重建一个新的', async () => {
+    const trashed = () => base().map((r) => (r.id === 'D' ? { ...r, deleted_at: 5 } : r));
+    await expect(narrowScope(fakeEnv(trashed()), who(['read']), '/drive')).rejects.toThrow(/scope not found/);
+    expect((await narrowScope(fakeEnv(trashed()), who(['write']), '/drive')).rootId).not.toBe('D');
   });
 });

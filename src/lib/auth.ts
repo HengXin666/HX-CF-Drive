@@ -65,6 +65,11 @@ export function requireScope(scope: 'read' | 'write' | 'admin' | 'stats') {
 export async function narrowScope(env: Env, p: Principal, scope: string | undefined): Promise<Principal> {
   if (!scope || scope === '/') return p;
   if (!scope.startsWith('/')) throw new HttpError(400, 'bad scope');
+  try {
+    decodeURIComponent(scope);
+  } catch {
+    throw new HttpError(400, 'bad scope');
+  }
   let node = await resolvePath(env, p.rootId, scope);
   if (!node && (p.scopes.has('write') || p.scopes.has('admin'))) node = await mkdirp(env, p.rootId, scope);
   if (!node) throw new HttpError(404, 'scope not found');
