@@ -1,6 +1,6 @@
 import type { Context, Next } from 'hono';
 import type { AppEnv, Env, Principal } from '../env';
-import { mkdirp, resolvePath } from './tree';
+import { epoch, mkdirp, resolvePath } from './tree';
 import { HttpError, now, safeEqual, sha256Hex } from './util';
 
 /** 调用方可用这个头把本次请求的根目录收窄到令牌根下的某个子目录 (如 HX-AIOA 的网盘只看 /drive) */
@@ -26,18 +26,31 @@ export function extractToken(req: Request): string | null {
   return null;
 }
 
+/**
+ * 令牌 -> 身份, 按令牌哈希在 isolate 内缓存 60 秒 (#23): 普通令牌 / WebDAV Basic 不再每个请求查一次 D1。
+ * 吊销语义和 tokenAlive 一致: 本 isolate 内 forgetToken 立即失效, 其他 isolate 最多 60 秒。只缓存有效令牌。
+ */
+const TTL = 60_000;
+const principalCache = new Map<string, { at: number; p: Principal; exp: number | null }>();
+
 export async function resolvePrincipal(env: Env, token: string | null): Promise<Principal | null> {
   if (!token) return null;
   if (env.ADMIN_TOKEN && safeEqual(token, env.ADMIN_TOKEN)) {
     return { id: 'admin', scopes: new Set(['read', 'write', 'admin']), rootId: 'root' };
   }
   const hash = await sha256Hex(token);
+  const t = now();
+  const hit = principalCache.get(hash);
+  if (hit && t - hit.at < TTL) return hit.exp && hit.exp < t ? null : hit.p;
   const row = await env.DB.prepare('SELECT id, scopes, root_id, expires_at FROM tokens WHERE token_hash = ?')
     .bind(hash)
     .first<{ id: string; scopes: string; root_id: string; expires_at: number | null}>();
   if (!row) return null;
-  if (row.expires_at && row.expires_at < now()) return null;
-  return { id: row.id, scopes: new Set(row.scopes.split(',').map((s) => s.trim())), rootId: row.root_id };
+  if (row.expires_at && row.expires_at < t) return null;
+  const p: Principal = { id: row.id, scopes: new Set(row.scopes.split(',').map((s) => s.trim())), rootId: row.root_id };
+  if (principalCache.size > 1000) principalCache.clear();
+  principalCache.set(hash, { at: t, p, exp: row.expires_at });
+  return p;
 }
 
 /** 中间件: 要求某个权限; 不传 scope 时只要令牌有效 */
@@ -62,8 +75,16 @@ export function requireScope(scope?: 'read' | 'write' | 'admin' | 'stats') {
  * 按 X-Drive-Scope 收窄根目录: 路径相对令牌根, 不存在时有写权限就建出来。
  * 之后 list, search, 回收站, 分享列表等都按新根隔离, 和令牌本身的根目录一样。
  */
+/** (令牌, 根, 权限, scope) -> 收窄后的根。本 isolate 内移动/删除/恢复过节点就作废 (epoch), 别的 isolate 最多滞后 60 秒 */
+const scopeCache = new Map<string, { at: number; rootId: string; epoch: number }>();
+
 export async function narrowScope(env: Env, p: Principal, scope: string | undefined): Promise<Principal> {
   if (!scope || scope === '/') return p;
+  // 同一令牌同一 scope 的解析结果缓存 60 秒 (AIOA 网盘每个请求都带这个头, 以前每次都走一遍路径)
+  const key = `${p.id}\0${p.rootId}\0${[...p.scopes].sort().join(',')}\0${scope}`;
+  const hit = scopeCache.get(key);
+  if (hit && hit.epoch === epoch() && now() - hit.at < TTL) return { ...p, rootId: hit.rootId };
+  const e = epoch();
   if (!scope.startsWith('/')) throw new HttpError(400, 'bad scope');
   try {
     decodeURIComponent(scope);
@@ -74,6 +95,8 @@ export async function narrowScope(env: Env, p: Principal, scope: string | undefi
   if (!node && (p.scopes.has('write') || p.scopes.has('admin'))) node = await mkdirp(env, p.rootId, scope);
   if (!node) throw new HttpError(404, 'scope not found');
   if (node.kind !== 'dir') throw new HttpError(409, 'scope is not a dir');
+  if (scopeCache.size > 1000) scopeCache.clear();
+  scopeCache.set(key, { at: now(), rootId: node.id, epoch: e });
   return { ...p, rootId: node.id };
 }
 
@@ -89,6 +112,16 @@ export async function tokenAlive(env: Env, tid: string): Promise<boolean> {
   aliveCache.set(tid, { at: now(), ok });
   return ok;
 }
+/** 测试用: 清掉身份与 scope 缓存 */
+export function clearAuthCaches(): void {
+  principalCache.clear();
+  scopeCache.clear();
+  aliveCache.clear();
+}
+
+/** 吊销令牌: 本 isolate 内的三种缓存立即清掉 */
 export function forgetToken(tid: string): void {
   aliveCache.delete(tid);
+  for (const [k, v] of principalCache) if (v.p.id === tid) principalCache.delete(k);
+  for (const k of scopeCache.keys()) if (k.startsWith(`${tid}\0`)) scopeCache.delete(k);
 }

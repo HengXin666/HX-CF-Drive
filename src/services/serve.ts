@@ -140,7 +140,8 @@ export async function serveNode(env: Env, node: NodeRow, req: Request, opt: Serv
     return new Response(null, { status: 200, headers: { ...base, 'Content-Length': String(node.size) } });
   }
 
-  const blob = await loadBlob(env, node.blob_id);
+  // 清单和 Bot 列表互不依赖, 冷 isolate 时并行查, 少一个串行的 D1 往返 (HEAD 用不到 Bot 列表, 不查)
+  const [blob, bots] = await Promise.all([loadBlob(env, node.blob_id), req.method === 'HEAD' ? null : allBots(env)]);
   const want = range ?? { start: 0, end: blob.size - 1 };
   // 分段清单: 一次响应最多拼 budget 片, 只读这些片所在的段
   const firstIdx = Math.floor(want.start / blob.chunkSize);
@@ -152,7 +153,7 @@ export async function serveNode(env: Env, node: NodeRow, req: Request, opt: Serv
   if (status === 206) headers['Content-Range'] = `bytes ${r.start}-${r.end}/${blob.size}`;
   if (req.method === 'HEAD') return new Response(null, { status, headers });
 
-  const body = await tgStream(env, blob, r, opt.waitUntil);
+  const body = await tgStream(env, blob, r, bots ?? (await allBots(env)), opt.waitUntil);
   if (useCache && status === 200) {
     const [a, b] = body.tee();
     const put = caches.default.put(cacheKey, new Response(b, { headers: { ...headers, 'Cache-Control': 'public, max-age=86400' } }));
@@ -162,9 +163,8 @@ export async function serveNode(env: Env, node: NodeRow, req: Request, opt: Serv
   return new Response(body, { status, headers });
 }
 
-async function tgStream(env: Env, blob: BlobInfo, r: ByteRange, waitUntil?: (p: Promise<unknown>) => void): Promise<ReadableStream<Uint8Array>> {
+async function tgStream(env: Env, blob: BlobInfo, r: ByteRange, bots: BotRow[], waitUntil?: (p: Promise<unknown>) => void): Promise<ReadableStream<Uint8Array>> {
   const slices = mapToChunks(r, blob.chunkSize);
-  const bots = await allBots(env);
   const FLS = (globalThis as { FixedLengthStream?: new (n: number) => TransformStream<Uint8Array, Uint8Array> }).FixedLengthStream;
   const { readable, writable } = FLS ? new FLS(r.end - r.start + 1) : new TransformStream<Uint8Array, Uint8Array>();
   // 预取下一片: 当前片在往外送时, 下一片的 getFile 与连接已经建好, 片与片之间不再串行等一个 TG 往返。

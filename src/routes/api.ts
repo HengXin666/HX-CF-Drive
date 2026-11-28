@@ -6,7 +6,7 @@ import { activeChannels, allBots, invalidateBotCache, invalidateChannelCache, tg
 import { forgetToken, requireScope } from '../lib/auth';
 import { signLink } from '../lib/sign';
 import {
-  assertAccess, getNode, getNodeCached, listChildren, mkdirp, moveNode, type NodeRow, pathFor, pathsOf, publicNode, resolvePath, trashNode,
+  assertAccess, getNode, getNodeAccessCached, getNodeWithAncestors, listChildren, mkdirp, moveNode, type NodeRow, pathFor, pathsOf, publicNode, resolvePath, trashNode,
   pathOf,
 } from '../lib/tree';
 import { HttpError, newId, now, sha256Hex } from '../lib/util';
@@ -23,17 +23,17 @@ type C = Context<AppEnv>;
 /** 通过 id 或 path 定位节点, 并检查令牌范围 */
 async function locate(c: C, id?: string | null, path?: string | null): Promise<NodeRow> {
   const p = c.get('principal');
-  let node: NodeRow | null = null;
-  if (id) node = await getNode(c.env, id);
-  else {
+  if (!id) {
     // 从令牌根解析的路径天然在根之下, 不用再查祖先
-    node = await resolvePath(c.env, p.rootId, path ?? '/');
+    const node = await resolvePath(c.env, p.rootId, path ?? '/');
     if (!node) throw new HttpError(404, 'not found');
     return node;
   }
-  if (!node) throw new HttpError(404, 'not found');
-  await assertAccess(c.env, p, node.id);
-  return node;
+  // getNode 本来就读出了整条祖先链, 权限直接查这个集合 (以前再发一次 isWithin)
+  const a = await getNodeWithAncestors(c.env, id);
+  if (!a) throw new HttpError(404, 'not found');
+  await assertAccess(c.env, p, a.node.id, a.ancestors);
+  return a.node;
 }
 
 export async function fileLink(env: Env, origin: string, node: NodeRow, expiresInSec = 0, tid = 'admin'): Promise<string> {
@@ -178,9 +178,10 @@ api.get('/fs/manifest', requireScope('read'), async (c) => {
 // ---------------- 读取内容 ----------------
 
 api.on(['GET', 'HEAD'], '/files/:id/content', requireScope('read'), async (c) => {
-  const node = await getNodeCached(c.env, c.req.param('id')!);
-  if (!node) throw new HttpError(404, 'not found');
-  await assertAccess(c.env, c.get('principal'), node.id);
+  const a = await getNodeAccessCached(c.env, c.req.param('id')!);
+  if (!a) throw new HttpError(404, 'not found');
+  await assertAccess(c.env, c.get('principal'), a.node.id, a.ancestors);
+  const node = a.node;
   return serveNode(c.env, node, c.req.raw, { download: c.req.query('download') === '1', waitUntil: (p) => c.executionCtx.waitUntil(p) });
 });
 

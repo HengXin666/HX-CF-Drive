@@ -20,7 +20,17 @@ export interface NodeRow {
  * 走到顶的节点 parent_id 必须为空 (即 root), 否则说明中间某级已被清理。
  */
 export async function getNode(env: Env, id: string): Promise<NodeRow | null> {
-  if (id === 'root') return env.DB.prepare('SELECT * FROM nodes WHERE id = ? AND deleted_at IS NULL').bind(id).first<NodeRow>();
+  return (await getNodeWithAncestors(env, id))?.node ?? null;
+}
+
+/** 节点和它的祖先 id 集合 (含自身)。 祖先链本来就要读出来判断是否被删, 顺手留下, 权限检查不必再走一遍 (#23) */
+export interface NodeAccess { node: NodeRow; ancestors: Set<string> }
+
+export async function getNodeWithAncestors(env: Env, id: string): Promise<NodeAccess | null> {
+  if (id === 'root') {
+    const n = await env.DB.prepare('SELECT * FROM nodes WHERE id = ? AND deleted_at IS NULL').bind(id).first<NodeRow>();
+    return n ? { node: n, ancestors: new Set(['root']) } : null;
+  }
   // 只扫一遍祖先链, 判断放在 JS 里做 (CTE 被子查询引用多次会重复计算, 行读翻好几倍)
   const r = await env.DB.prepare(
     `WITH RECURSIVE up(depth, ${COLS}) AS (
@@ -35,23 +45,34 @@ export async function getNode(env: Env, id: string): Promise<NodeRow | null> {
   const chain = r.results;
   if (!chain.length || chain.some((x) => x.deleted_at !== null) || chain[chain.length - 1].parent_id !== null) return null;
   const { depth: _d, ...node } = chain[0];
-  return node;
+  return { node, ancestors: new Set(chain.map((x) => x.id)) };
 }
 
-/** 读路径用的节点缓存 60 秒: 播放器反复 Range, 热门图片反复访问时 D1 零读。本 isolate 内删除或移动会立即失效 */
-const nodeCache = new Map<string, { at: number; n: NodeRow }>();
-export async function getNodeCached(env: Env, id: string): Promise<NodeRow | null> {
+/**
+ * 读路径用的节点缓存 60 秒: 播放器反复 Range, 热门图片反复访问时 D1 零读。本 isolate 内删除或移动会立即失效。
+ * 连祖先集合一起缓存, 权限检查也不查 D1; 移动目录后子孙的祖先集合最多滞后 60 秒 (和节点缓存本身一样)。
+ */
+const nodeCache = new Map<string, { at: number; a: NodeAccess }>();
+export async function getNodeAccessCached(env: Env, id: string): Promise<NodeAccess | null> {
   const hit = nodeCache.get(id);
-  if (hit && Date.now() - hit.at < 60_000) return hit.n;
-  const n = await getNode(env, id);
-  if (!n) return null;
+  if (hit && Date.now() - hit.at < 60_000) return hit.a;
+  const a = await getNodeWithAncestors(env, id);
+  if (!a) return null;
   if (nodeCache.size > 5000) nodeCache.clear();
-  nodeCache.set(id, { at: Date.now(), n });
-  return n;
+  nodeCache.set(id, { at: Date.now(), a });
+  return a;
+}
+export async function getNodeCached(env: Env, id: string): Promise<NodeRow | null> {
+  return (await getNodeAccessCached(env, id))?.node ?? null;
 }
 export function forgetNode(id: string): void {
   nodeCache.delete(id);
+  treeEpoch++;
 }
+
+/** 本 isolate 内目录树结构变化 (移动, 删除, 恢复) 的计数。按路径解析的缓存 (X-Drive-Scope) 记下它, 变了就作废 */
+let treeEpoch = 0;
+export const epoch = () => treeEpoch;
 
 export async function childByName(env: Env, parentId: string, name: string): Promise<NodeRow | null> {
   return env.DB.prepare('SELECT * FROM nodes WHERE parent_id = ? AND name = ? AND deleted_at IS NULL')
@@ -160,8 +181,10 @@ export async function isWithin(env: Env, nodeId: string, ancestorId: string): Pr
   return !!r;
 }
 
-export async function assertAccess(env: Env, p: Principal, nodeId: string): Promise<void> {
-  if (!(await isWithin(env, nodeId, p.rootId))) throw new HttpError(403, 'outside token root');
+/** 节点必须在令牌根之下。已有祖先集合 (getNodeWithAncestors 读出来的) 时直接查集合, 不再发一次递归查询 */
+export async function assertAccess(env: Env, p: Principal, nodeId: string, ancestors?: Set<string>): Promise<void> {
+  const ok = ancestors ? p.rootId === 'root' || ancestors.has(p.rootId) : await isWithin(env, nodeId, p.rootId);
+  if (!ok) throw new HttpError(403, 'outside token root');
 }
 
 /** 节点的完整路径 (相对 root)  */
@@ -269,6 +292,7 @@ export async function restoreNode(env: Env, id: string, fallbackId = 'root'): Pr
   let name = node.name;
   if (await childByName(env, parentId, name)) name = `${name} (restored ${new Date().toISOString().slice(0, 19)})`;
   await env.DB.prepare('UPDATE nodes SET parent_id = ?, name = ?, deleted_at = NULL WHERE id = ?').bind(parentId, name, id).run();
+  forgetNode(id);
 }
 
 export function publicNode(n: NodeRow) {

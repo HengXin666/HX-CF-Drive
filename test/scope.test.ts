@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { narrowScope } from '../src/lib/auth';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { clearAuthCaches, narrowScope } from '../src/lib/auth';
 
 type Row = { id: string; parent_id: string | null; name: string; kind: string; deleted_at: number | null };
 
@@ -42,6 +42,8 @@ const base = (): Row[] => [
 const who = (scopes: string[]) => ({ id: 't', scopes: new Set(scopes), rootId: 'R' });
 
 describe('X-Drive-Scope 收窄根目录', () => {
+  // 解析结果在 isolate 内缓存 60 秒 (#23), 每个用例用的是不同的假库
+  beforeEach(() => clearAuthCaches());
   it('没给或给 / 时不变', async () => {
     const p = who(['read']);
     expect(await narrowScope(fakeEnv(base()), p, undefined)).toBe(p);
@@ -65,5 +67,18 @@ describe('X-Drive-Scope 收窄根目录', () => {
     const trashed = () => base().map((r) => (r.id === 'D' ? { ...r, deleted_at: 5 } : r));
     await expect(narrowScope(fakeEnv(trashed()), who(['read']), '/drive')).rejects.toThrow(/scope not found/);
     expect((await narrowScope(fakeEnv(trashed()), who(['write']), '/drive')).rootId).not.toBe('D');
+  });
+  it('同一令牌同一 scope 60 秒内不再查库; 本 isolate 删除/移动过节点后重新解析', async () => {
+    const { forgetNode } = await import('../src/lib/tree');
+    let queries = 0;
+    const env = fakeEnv(base()) as { DB: { prepare: (s: string) => unknown } };
+    const prep = env.DB.prepare;
+    env.DB.prepare = (sql: string) => { queries++; return prep(sql); };
+    expect((await narrowScope(env as never, who(['read']), '/drive')).rootId).toBe('D');
+    expect((await narrowScope(env as never, who(['read']), '/drive')).rootId).toBe('D');
+    expect(queries).toBe(1);
+    forgetNode('D');
+    await narrowScope(env as never, who(['read']), '/drive');
+    expect(queries).toBe(2);
   });
 });
