@@ -1,5 +1,6 @@
 // 文件浏览: 路径眉标, 上传 (拖放/选择), 新建目录, 搜索, 预览, 下载, 直链, 分享, 重命名, 移动 (目录树), 删除, 多选批量操作
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { ContextMenu, useContextMenu } from '../components/ContextMenu';
 import { Icon, IconButton } from '../components/Icon';
 import { ImageCell } from '../components/ImageCell';
 import { MoveDialog } from '../components/MoveDialog';
@@ -71,6 +72,8 @@ export function Files({ path, go, onChange }: { path: string; go: (p: string) =>
   const [preview, setPreview] = useState<PreviewTarget | null>(null);
   const [drag, setDrag] = useState(false);
   const [img, setImg] = usePrefs();
+  const rowMenu = useContextMenu<Node>();
+  const blankMenu = useContextMenu<null>();
   const picker = useRef<HTMLInputElement>(null);
   // 只有管理员能列令牌; 其他令牌拿不到就当没有
   const [tokens, setTokens] = useState<TokenRow[]>([]);
@@ -149,6 +152,16 @@ export function Files({ path, go, onChange }: { path: string; go: (p: string) =>
       await copy(r.url, '分享链接');
     },
   });
+
+  const rename = (n: Node) => setPrompt({
+    title: '重命名', fields: [{ key: 'name', label: '新名称', value: n.name }],
+    onOk: async (v) => { await fs.move(n.id, undefined, v.name.trim()); changed(); },
+  });
+  const mkdir = () => setPrompt({
+    title: '新建目录', fields: [{ key: 'name', label: '目录名' }],
+    onOk: async (v) => { await fs.mkdir(joinPath(path, v.name.trim())); changed(); },
+  });
+  const fail = (e: unknown) => toast.error((e as Error).message);
 
   /** 删除或移出令牌根目录时的提醒; 没有受影响的令牌返回空串 */
   const tokenWarn = (items: Item[], verb: string) => {
@@ -263,6 +276,11 @@ export function Files({ path, go, onChange }: { path: string; go: (p: string) =>
         className={cn('relative rounded-xl transition-shadow', drag && 'ring-2 ring-brand ring-offset-4 ring-offset-background')}
         onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setDrag(true); } }}
         onDragLeave={() => setDrag(false)}
+        onContextMenu={(e) => {
+          // 输入框保留浏览器菜单 (粘贴等)
+          if ((e.target as HTMLElement).closest('input, textarea')) return;
+          blankMenu.open(e, null);
+        }}
         onDrop={(e) => {
           e.preventDefault();
           setDrag(false);
@@ -321,10 +339,37 @@ export function Files({ path, go, onChange }: { path: string; go: (p: string) =>
             </>
           )}
           onRowClick={(n) => { open(n).catch((e) => toast.error((e as Error).message)); }}
+          onRowContextMenu={(n, e) => rowMenu.open(e, n)}
           emptyText={searching ? '没有匹配的文件' : '空目录, 把文件拖进来或点上传'}
           emptyIcon={searching ? 'search' : 'upload'}
         />
       </div>
+      <ContextMenu at={rowMenu.at} onClose={rowMenu.close}>
+        {(n) => (
+          <>
+            <DropdownMenuItem onSelect={() => void open(n).catch(fail)}><Icon name={n.kind === 'dir' ? 'folder' : 'eye'} /> {n.kind === 'dir' ? '打开' : '预览'}</DropdownMenuItem>
+            {n.kind === 'file' && <DropdownMenuItem onSelect={() => void save(n).catch(fail)}><Icon name="download" /> 下载</DropdownMenuItem>}
+            <DropdownMenuItem onSelect={() => share(n)}><Icon name="share" /> 分享</DropdownMenuItem>
+            {n.kind === 'file' && <DropdownMenuItem onSelect={() => void fs.link(n.id, 0).then((r) => copy(r.url, '永久直链'), fail)}><Icon name="link" /> 复制永久直链</DropdownMenuItem>}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => rename(n)}><Icon name="rename" /> 重命名</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setMoving([full(n)])}><Icon name="move" /> 移动到…</DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem variant="destructive" onSelect={() => void remove([full(n)])}><Icon name="trash" /> 删除</DropdownMenuItem>
+          </>
+        )}
+      </ContextMenu>
+      <ContextMenu at={blankMenu.at} onClose={blankMenu.close}>
+        {() => (
+          <>
+            <DropdownMenuItem onSelect={mkdir}><Icon name="newFolder" /> 新建目录</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => picker.current?.click()}><Icon name="upload" /> 上传文件</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void load()}><Icon name="refresh" /> 刷新</DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => setImg({ ...img, on: !img.on })}><Icon name={img.on ? 'close' : 'image'} /> {img.on ? '关闭图片预览' : '在列表里显示图片'}</DropdownMenuItem>
+          </>
+        )}
+      </ContextMenu>
       <PromptDialog req={prompt} onClose={() => setPrompt(null)} />
       <MoveDialog
         nodes={moving}

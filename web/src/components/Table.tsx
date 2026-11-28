@@ -1,7 +1,7 @@
 // 表格: 包一层 HX-UI 的 DataTable (TanStack), 列用 key / header / render 描述, 可选标题与右上角操作。
 // 列宽与对齐库里还不支持 (已提 issue), 先在单元格里自己对齐。
 import { type ColumnDef, DataTable as HxTable } from '@hx/ui/data';
-import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import { type MouseEvent, type ReactNode, useEffect, useMemo, useState } from 'react';
 import type { IconName } from '../icons';
 import { cn } from '../ui';
 import { Icon } from './Icon';
@@ -38,6 +38,8 @@ export function DataTable<T>(props: {
   emptyText?: string;
   emptyIcon?: IconName;
   onRowClick?: (row: T) => void;
+  /** 右键某一行; 不传则保留浏览器默认菜单 */
+  onRowContextMenu?: (row: T, e: MouseEvent) => void;
   title?: string;
   description?: string;
   actions?: ReactNode;
@@ -52,7 +54,7 @@ export function DataTable<T>(props: {
     id: c.key,
     header: () => <span className={cn(c.align === 'right' && 'block w-full text-right')}>{c.header}</span>,
     ...(c.sort ? { accessorFn: c.sort, enableSorting: true } : { enableSorting: false }),
-    cell: ({ row }) => <div className={cn(c.align === 'right' && 'flex justify-end', c.className)}>{c.render(row.original)}</div>,
+    cell: ({ row }) => <div data-rk={props.rowKey(row.original)} className={cn(c.align === 'right' && 'flex justify-end', c.className)}>{c.render(row.original)}</div>,
   })), [props.columns, narrow]);
   const table = (
     <HxTable<T>
@@ -75,7 +77,16 @@ export function DataTable<T>(props: {
       aria-label={props.title}
     />
   );
-  if (!props.title && !props.actions) return table;
+  // 右键: 从事件目标找到所在行 (单元格里带了 data-rk), 空白处交给外层
+  const ctx = props.onRowContextMenu;
+  const body = ctx ? (
+    <div onContextMenu={(e) => {
+      const k = (e.target as HTMLElement).closest('tr')?.querySelector<HTMLElement>('[data-rk]')?.dataset.rk;
+      const r = k === undefined ? undefined : props.rows.find((x) => props.rowKey(x) === k);
+      if (r) ctx(r, e);
+    }}>{table}</div>
+  ) : table;
+  if (!props.title && !props.actions) return body;
   return (
     <section className="flex flex-col gap-3">
       <div className="flex items-end gap-3">
@@ -85,7 +96,7 @@ export function DataTable<T>(props: {
         </div>
         {props.actions}
       </div>
-      {table}
+      {body}
     </section>
   );
 }

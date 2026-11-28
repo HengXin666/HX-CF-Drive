@@ -1,7 +1,8 @@
 // 移动到: 左边目录树选目标, 底部显示将要移到的完整路径
 import { useEffect, useState } from 'react';
 import type { Node } from '../lib/api';
-import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../ui';
+import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DropdownMenuItem, DropdownMenuSeparator } from '../ui';
+import { Icon } from './Icon';
 import { FolderTree } from './FolderTree';
 
 const within = (p: string, dir: string) => dir === '/' || p === dir || p.startsWith(dir + '/');
@@ -21,11 +22,11 @@ export function MoveDialog({ nodes, from, onClose, onMove }: {
   const dirs = (nodes ?? []).filter((n) => n.kind === 'dir').map((n) => n.fullPath);
   const label = nodes?.length === 1 ? nodes[0].name : `${nodes?.length ?? 0} 个项目`;
 
-  const submit = async () => {
+  const submit = async (dest = to) => {
     setBusy(true);
     setErr('');
     try {
-      await onMove(to);
+      await onMove(dest);
       onClose();
     } catch (e) {
       setErr((e as Error).message);
@@ -42,7 +43,14 @@ export function MoveDialog({ nodes, from, onClose, onMove }: {
           <DialogDescription>选择目标目录, 双击或点箭头展开。</DialogDescription>
         </DialogHeader>
         <div className="max-h-80 overflow-y-auto rounded-lg border bg-background/50 p-1.5">
-          <FolderTree value={to} onChange={setTo} disabled={(p) => dirs.some((d) => within(p, d))} />
+          <FolderTree value={to} onChange={setTo} disabled={(p) => dirs.some((d) => within(p, d))} menu={(p, t) => (
+            <>
+              <DropdownMenuItem disabled={t.disabled || p === from} onSelect={() => { setTo(p); void submit(p); }}><Icon name="move" /> 移到这里</DropdownMenuItem>
+              <DropdownMenuItem disabled={t.disabled} onSelect={() => setTo(p)}><Icon name="check" /> 选为目标</DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={t.toggle}><Icon name={t.open ? 'folder' : 'tree'} /> {t.open ? '折叠' : '展开'}</DropdownMenuItem>
+            </>
+          )} />
         </div>
         <p className="truncate font-mono text-xs text-muted-foreground">
           {from} <span className="px-1">→</span> <span className="text-foreground">{to}</span>

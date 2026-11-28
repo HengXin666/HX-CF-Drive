@@ -1,18 +1,22 @@
 // 目录树: 选目标目录用 (移动到)。按需展开, 展开时才去拉子目录; 版式参考 hxoa 面板的工作区树。
 // HX-UI 还没有 Tree / TreeSelect (已提 issue), 先在这里自己写。
 import { ChevronRight, Folder, FolderOpen, House } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useState } from 'react';
 import { fs, joinPath } from '../lib/api';
 import { cn } from '../ui';
+import { ContextMenu, useContextMenu } from './ContextMenu';
 
 interface Dir { path: string; name: string }
 
-export function FolderTree({ value, onChange, disabled }: {
+export function FolderTree({ value, onChange, disabled, menu }: {
   value: string;
   onChange: (path: string) => void;
   /** 不能选的目录 (及其子目录), 如被移动的目录自己 */
   disabled?: (path: string) => boolean;
+  /** 右键菜单的内容; 不传则保留浏览器默认菜单 */
+  menu?: (path: string, ctl: { open: boolean; toggle: () => void; disabled: boolean }) => ReactNode;
 }) {
+  const ctx = useContextMenu<string>();
   const [kids, setKids] = useState<Record<string, Dir[] | 'loading' | string>>({});
   // 默认展开到当前选中目录的每一级
   const [open, setOpen] = useState<Set<string>>(() => {
@@ -59,6 +63,7 @@ export function FolderTree({ value, onChange, disabled }: {
           style={{ paddingLeft: 6 + depth * 16 }}
           onClick={() => { if (!off) onChange(d.path); }}
           onDoubleClick={() => toggle(d.path)}
+          onContextMenu={menu ? (e) => ctx.open(e, d.path) : undefined}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !off) onChange(d.path);
             if (e.key === 'ArrowRight' && !isOpen) toggle(d.path);
@@ -90,5 +95,14 @@ export function FolderTree({ value, onChange, disabled }: {
     );
   };
 
-  return <div role="tree" className="flex flex-col gap-0.5">{row({ path: '/', name: '全部文件' }, 0)}</div>;
+  return (
+    <div role="tree" className="flex flex-col gap-0.5">
+      {row({ path: '/', name: '全部文件' }, 0)}
+      {menu && (
+        <ContextMenu at={ctx.at} onClose={ctx.close}>
+          {(p) => menu(p, { open: open.has(p), toggle: () => toggle(p), disabled: disabled?.(p) ?? false })}
+        </ContextMenu>
+      )}
+    </div>
+  );
 }
