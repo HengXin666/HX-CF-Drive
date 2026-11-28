@@ -1,7 +1,7 @@
 /**
  * 无状态分片上传: init → chunk × N → commit
  * - init: 校验 + 秒传判断, 返回签名的上传凭证。D1 只读不写
- * - chunk: 请求体流式转发给 TG, 返回签名的分片回执。D1 零读写
+ * - chunk: 请求体流式转发给 TG, 返回签名的分片回执。带令牌时 D1 零读写; 只凭票据时查令牌是否还在 (isolate 内缓存 60 秒)
  * - fold (可选, 大文件): 每凑满一组 PART_SIZE 片, 把回执换成一个签名的聚合回执, 分摊 commit 的验签 CPU
  * - commit: 验签回执和聚合回执, 一次批量写入 blob + node (约 4 行, 含索引); 超过 PART_SIZE 片时清单拆进 blob_parts
  * 上传进度由客户端保存回执来记录, 断点续传只需重传缺的分片。
@@ -11,6 +11,7 @@ import { chunkSizeOf } from '../env';
 import {
   activeChannels, coolDown, markDead, pickBot, pickChannel, sendChunkStream, TgFatal, TgRateLimit, usableBots,
 } from '../drivers/tg';
+import { tokenAlive } from '../lib/auth';
 import { openJson, sealJson } from '../lib/sign';
 import { assertAccess, childByName, getNode, type NodeRow, trashNode } from '../lib/tree';
 import { cleanMime, HttpError, newId, now, validName } from '../lib/util';
@@ -141,9 +142,25 @@ export async function blobVisible(env: Env, rootId: string, blobId: string): Pro
 }
 
 export async function openTicket(env: Env, p: Principal, sealed: string): Promise<Ticket> {
+  const t = await verifyTicket(env, sealed);
+  if (t.u !== p.id) throw new HttpError(403, 'ticket belongs to another token');
+  return t;
+}
+
+async function verifyTicket(env: Env, sealed: string): Promise<Ticket> {
   const t = await openJson<Ticket>(env.SIGNING_KEY, TICKET, sealed);
   if (!t || t.x < now() / 1000) throw new HttpError(400, 'bad or expired upload ticket');
-  if (t.u !== p.id) throw new HttpError(403, 'ticket belongs to another token');
+  return t;
+}
+
+/**
+ * 只凭票据传分片 (不带 Authorization): 票据本身是 HMAC 签过的 24 小时凭证, 只能往这一个上传里写字节,
+ * 不能 commit (commit 仍要令牌)。签发它的令牌被吊销或过期后立即作废 (tokenAlive 60 秒缓存)。
+ * 给手机这类不该持有 Drive 令牌的客户端直传用, 见 docs/INTEGRATION.md。
+ */
+export async function openTicketBare(env: Env, sealed: string): Promise<Ticket> {
+  const t = await verifyTicket(env, sealed);
+  if (!(await tokenAlive(env, t.u))) throw new HttpError(403, 'ticket token revoked');
   return t;
 }
 

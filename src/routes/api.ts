@@ -12,7 +12,7 @@ import {
 import { HttpError, newId, now, sha256Hex } from '../lib/util';
 import { runMaintenance } from '../services/maintenance';
 import { ensureParts, loadBlob, serveNode } from '../services/serve';
-import { commitUpload, foldReceipts, initUpload, openTicket, putChunk, uploadStream } from '../services/upload';
+import { commitUpload, foldReceipts, initUpload, openTicket, openTicketBare, putChunk, uploadStream } from '../services/upload';
 import { trash } from './trash';
 
 export const api = new Hono<AppEnv>();
@@ -195,12 +195,19 @@ api.post('/uploads', requireScope('write'), async (c) => {
   else parent = await locate(c, null, b.path ?? '/');
   const r = await initUpload(c.env, p, { parentId: parent.id, parent, name: b.name, size: b.size, mime: b.mime, sha256: b.sha256, overwrite: b.overwrite });
   if (r.done) return c.json({ done: true, node: publicNode(r.node), url: await linkFor(c, r.node) });
-  return c.json(r);
+  // chunkUrl: 公网分片地址, 只凭票据就能传 (v0.4); 调用方据此判断能否让客户端直传
+  return c.json({ ...r, chunkUrl: `${publicOrigin(c.env, c.req.url)}/api/v1/uploads/chunk` });
 });
 
-/** 第 2 步: 上传分片, 请求体是原始字节。?ticket=...&i=序号。返回回执, 客户端自己保存 */
-api.put('/uploads/chunk', requireScope('write'), async (c) => {
-  const t = await openTicket(c.env, c.get('principal'), c.req.query('ticket') ?? '');
+/**
+ * 第 2 步: 上传分片, 请求体是原始字节。?ticket=...&i=序号。返回回执, 客户端自己保存。
+ * 带令牌时校验令牌与票据属于同一令牌; 不带 Authorization 时只凭票据 (v0.4, 见 openTicketBare)。
+ */
+// 只要带了 Authorization (哪怕是空的或格式不对) 就按令牌校验, 坏令牌照样 401, 不退回只凭票据
+api.put('/uploads/chunk', async (c, next) => (c.req.raw.headers.has('Authorization') ? requireScope('write')(c, next) : next()), async (c) => {
+  const sealed = c.req.query('ticket') ?? '';
+  const p = c.get('principal');
+  const t = p ? await openTicket(c.env, p, sealed) : await openTicketBare(c.env, sealed);
   const len = Number(c.req.header('Content-Length'));
   if (!Number.isFinite(len) || !c.req.raw.body) throw new HttpError(411, 'Content-Length required');
   const receipt = await putChunk(c.env, t, Number(c.req.query('i')), c.req.raw.body, len);

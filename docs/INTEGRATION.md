@@ -38,13 +38,13 @@ curl -X POST -H "Authorization: Bearer $ADMIN" -H "Content-Type: application/jso
 | GET | `/api/v1/fs/manifest?id=` | 分片清单 `{size, chunkSize, chunks: [{bot, fileId, size}]}`; 持有对应 Bot 令牌的客户端可直接从 TG 拉取 (read, 只限自己的子树; file_id 没有 Bot 令牌用不了) |
 | GET | `/api/v1/files/:id/content` | 读取内容, 支持 Range, `?download=1` |
 | POST | `/api/v1/upload?path=&rename=1` | 一次性上传 (multipart 字段 file, 或原始 body + `?name=`) |
-| POST | `/api/v1/uploads` | 分片上传: 初始化, 返回签名凭证 ticket |
-| PUT | `/api/v1/uploads/chunk?i=&ticket=` | 分片上传: 传第 i 片, 返回签名回执 receipt |
+| POST | `/api/v1/uploads` | 分片上传: 初始化, 返回签名凭证 ticket 与公网分片地址 chunkUrl (v0.4) |
+| PUT | `/api/v1/uploads/chunk?i=&ticket=` | 分片上传: 传第 i 片, 返回签名回执 receipt。可以不带令牌, 只凭票据 (v0.4, 见下文 "只凭票据直传") |
 | POST | `/api/v1/uploads/fold` `{ticket, receipts}` | 分片上传 (可选): 一组 256 片的回执换一个聚合回执 fold |
 | POST | `/api/v1/uploads/commit` `{ticket, receipts, folds}` | 分片上传: 提交回执和聚合回执 |
 | POST/GET/DELETE | `/api/v1/shares` | 分享链接 |
 | GET | `/f/:id/:name?e=&s=` | 签名直链 (公开) |
-| GET | `/s/:id?path=子路径` | 分享 (公开); 有密码时用 `X-Share-Password` 头 (也接受 `?p=`, 但会进日志和历史), 连错 10 次锁 15 分钟 |
+| GET | `/s/:id?path=子路径` | 分享 (公开); 有密码时用 `X-Share-Password` 头 (也接受 `?p=`, 但会进日志和历史), 连错 10 次锁 15 分钟。浏览器打开 (`Accept: text/html`) 时返回页面 (v0.4): 密码输入, 文件夹列表, 下载按钮; `?download=1` 下载, `?raw=1` 照旧返回 JSON / 文件本身。页面里的密码表单 `POST /s/:id` (表单字段 `p`, `path`), 输对后发一个只对该分享有效 1 天的 HttpOnly Cookie, 之后的链接不带密码 |
 | * | `/api/v1/admin/*` | 管理: stats, bots, channels, tokens, maintenance |
 
 错误统一返回 `{"error": "..."}`; 服务端内部错误只返回 `{"error":"internal error","requestId":"..."}`。429 和 503 带 `Retry-After` 头, 客户端按它等待后重试。
@@ -57,7 +57,7 @@ curl -X POST -H "Authorization: Bearer $ADMIN" -H "Content-Type: application/jso
 # 1. 初始化。带 sha256 (客户端自己算) 可以秒传
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"path":"/video","name":"a.mp4","size":52428800,"sha256":"..."}' $BASE/api/v1/uploads
-# => {"done":false,"ticket":"...","chunkSize":19922944,"chunkCount":3}
+# => {"done":false,"ticket":"...","chunkSize":19922944,"chunkCount":3,"chunkUrl":"https://drive.example.com/api/v1/uploads/chunk"}
 # 或 {"done":true,"node":{...}} 表示秒传成功
 
 # 2. 逐片上传, 每片恰好 chunkSize 字节 (最后一片除外)。可并发, 429 时按 Retry-After 重试
@@ -76,6 +76,26 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
 - 凭证 24 小时有效。中断后用同一个 ticket 补传缺的分片 (已有回执的不用重传), 再 commit。
 - 回执只是签名字符串, 可以存在任何地方 (文件, 数据库)。网页端存在 localStorage, 键是目录 + 文件名 + 大小 + 修改时间。
 
+#### 只凭票据直传 (v0.4)
+
+服务端 (持有令牌) 申请上传, 让没有令牌的客户端 (手机 App, 浏览器) 直接把字节传给 Drive, 不经服务端转发:
+
+1. 服务端用自己的令牌 `POST /api/v1/uploads`, 把返回的 `ticket`, `chunkSize`, `chunkCount`, `chunkUrl` 交给客户端。
+2. 客户端 `PUT <chunkUrl>?i=<序号>&ticket=<票据>`, 不带 `Authorization`, 请求体是这一片的字节 (要有 `Content-Length`), 返回 `{"receipt":"..."}`。
+3. 客户端把回执交回服务端, 服务端用令牌 fold / commit (fold 与 commit 仍然要令牌)。
+
+```bash
+curl -X PUT --data-binary @part0 "$CHUNK_URL?i=0&ticket=$TICKET"
+```
+
+- 票据是 HMAC 签过的凭证, 只能往这一个上传里写字节, 不能读, 不能提交, 不能写别的文件; 24 小时到期。
+- 签发票据的令牌被吊销或过期后, 它签的票据最多 60 秒内作废 (令牌状态每个 isolate 缓存 60 秒)。
+- D1: 带令牌传分片仍是零读写; 只凭票据时要查一次令牌是否还在, 每个 isolate 每个令牌每分钟最多读 1 行 (管理员签的票据不查)。
+- 带了 `Authorization` 时按令牌校验 (票据必须是这个令牌签的), 和以前一样; 带了坏令牌回 401, 不会退回只凭票据。
+- 票据在 URL 里, 会进访问日志; 它只能补这一个上传的分片, 泄露的后果是别人能往这个上传里塞字节 (commit 时内容不对由调用方自己校验哈希)。
+- CORS: `/api/*` 允许任意来源的 PUT, 浏览器直传不需要额外配置。
+- `chunkUrl` 是 `PUBLIC_URL` (没配时为请求地址) 下的分片接口。经 Service Binding 调用的服务要配 `PUBLIC_URL`, 或像 HX-AIOA 一样用公网地址做请求 URL, 返回的地址才是客户端能访问的。`/uploads` 的返回里没有 `chunkUrl` 说明 Drive 是 v0.4 之前的版本, 只能由服务端转发分片。
+
 #### 分批提交 (fold)
 
 分片很多时 (例如 100 GB 约 5390 片), 一次 commit 验几千个签名可能超出 Free 计划的 CPU 时间。多于 256 片时建议:
@@ -85,6 +105,8 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
 3. commit 时 `{ticket, folds: [...], receipts: [没折叠的零散回执]}`。两者可以混用, 同一组给了聚合回执就忽略它的零散回执。
 
 限制: 一次 fold 只接受一个完整的组, 跨组或缺片返回 400; 聚合回执和凭证一样 24 小时内有效。256 片以内的文件不需要 fold。
+
+超过 256 片的文件请一定按组 fold: 10 GB 约 540 片 = 3 组, commit 只验 3 个聚合回执的签名, 清单分 3 段写进 `blob_parts`。直传时客户端拿到一组的全部回执后交给服务端 fold, 服务端只需在 commit 时交聚合回执。
 
 ### 下载与续传
 
