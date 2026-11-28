@@ -3,11 +3,12 @@ import {
   ArrowLeft, BookOpen, Check, ChevronRight, CircleAlert, Copy, Cpu, Database, Download, Eye, FileArchive, FileCode2,
   FileText, Film, Folder, FolderInput, FolderOpen, FolderPlus, FolderTree, House, Image, KeyRound, Link2, Lock, LogOut, type LucideIcon,
   Moon, Music, MoreHorizontal, Pencil, Plus, RefreshCw, RotateCcw, Search, Send, Server, Settings, Share2, ShieldCheck,
-  Sun, Trash2, Upload, X, Info, Rocket, HardDrive,
+  Sun, Trash2, Upload, X, Info, Rocket, HardDrive, LoaderCircle,
 } from 'lucide-react';
 
 export const ICON = {
   logo: HardDrive,
+  spinner: LoaderCircle,
   files: FolderOpen,
   trash: Trash2,
   share: Share2,

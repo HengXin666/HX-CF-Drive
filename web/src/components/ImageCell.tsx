@@ -2,26 +2,30 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import type { Node } from '../lib/api';
 import { load, peek } from '../lib/imgcache';
+import { Icon } from './Icon';
 
 export function ImageCell({ node, fallback }: { node: Node; fallback: ReactNode }) {
   const ref = useRef<HTMLSpanElement>(null);
   const [src, setSrc] = useState(() => peek(node));
   const [failed, setFailed] = useState(false);
+  const [busy, setBusy] = useState(false);
   useEffect(() => {
     if (src || failed || !ref.current) return;
     let dead = false;
     const io = new IntersectionObserver((es) => {
       if (!es.some((e) => e.isIntersecting)) return;
       io.disconnect();
+      setBusy(true);
       load(node).then((u) => { if (!dead) setSrc(u); }, () => { if (!dead) setFailed(true); });
-    }, { rootMargin: '200px' });
+    }, { rootMargin: '600px' });
     io.observe(ref.current);
     return () => { dead = true; io.disconnect(); };
   }, [node, src, failed]);
   if (failed) return <>{fallback}</>;
   return (
     <span ref={ref} className="grid size-12 shrink-0 place-items-center overflow-hidden rounded-md border bg-muted/40">
-      {src ? <img src={src} alt="" decoding="async" draggable={false} className="size-full object-cover" /> : fallback}
+      {src ? <img src={src} alt="" decoding="async" draggable={false} className="size-full object-cover" />
+        : busy ? <Icon name="spinner" className="size-4 animate-spin text-muted-foreground" /> : fallback}
     </span>
   );
 }

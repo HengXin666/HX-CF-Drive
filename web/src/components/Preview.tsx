@@ -39,7 +39,7 @@ export function Preview({ target, onClose, onDownload }: { target: PreviewTarget
         </DialogHeader>
         {target && (mime.startsWith('image/') ? (
           src ? <img src={src} alt={target.node.name} className="max-h-[72vh] w-full rounded-lg object-contain" />
-            : <div className="grid h-[40vh] place-items-center text-sm text-muted-foreground">加载原图…</div>
+            : <div className="grid h-[40vh] place-items-center text-sm text-muted-foreground"><span className="flex items-center gap-2"><Icon name="spinner" className="size-5 animate-spin" />加载原图…</span></div>
         ) : mime.startsWith('video/') ? (
           <video src={src} controls autoPlay className="max-h-[72vh] w-full rounded-lg bg-black" />
         ) : mime.startsWith('audio/') ? (

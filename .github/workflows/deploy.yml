@@ -119,8 +119,11 @@ jobs:
           [ -n "$CHANNEL" ] || { echo "::error::缺少 TG_CHANNEL_ID"; exit 1; }
           sleep 5
           curl -fsS -A "hx-cf-drive-ci/1" -X POST -H "Authorization: Bearer $ADMIN" "$BASE/api/v1/admin/maintenance" > /dev/null
-          curl -fsS -A "hx-cf-drive-ci/1" -X POST -H "Authorization: Bearer $ADMIN" -H "Content-Type: application/json" \
-            -d "{\"id\":\"$CHANNEL\"}" "$BASE/api/v1/admin/channels" | jq .
+          # TG_CHANNEL_ID 可以是逗号分隔的多个频道
+          for ch in ${CHANNEL//,/ }; do
+            curl -fsS -A "hx-cf-drive-ci/1" -X POST -H "Authorization: Bearer $ADMIN" -H "Content-Type: application/json" \
+              -d "{\"id\":\"$ch\"}" "$BASE/api/v1/admin/channels" | jq -c .
+          done
 
       - name: 冒烟
         env:

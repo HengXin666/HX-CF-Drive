@@ -9,7 +9,7 @@ const INDEX = 'hxd_imgcache';
 const STORE = 'hxd-img-v1';
 const MEM_CAP = 200 * 1024 * 1024;
 const DISK_CAP = 500 * 1024 * 1024;
-const PARALLEL = 4;
+const PARALLEL = 6;
 
 export interface ImgPrefs { on: boolean; maxMB: number }
 export const prefs = {

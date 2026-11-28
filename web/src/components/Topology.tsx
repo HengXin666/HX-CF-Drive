@@ -77,7 +77,7 @@ export function Topology() {
         <div className="grid gap-0.5">
           <div className="flex items-center gap-2 font-semibold"><Icon name="tree" className="size-4 text-brand" />存储拓扑</div>
           <div className="text-xs text-muted-foreground">
-            {t ? <>{liveBots} / {t.bots.length} 个 Bot 可用, 写入 {liveChans} / {t.channels.length} 个频道, 共 {total?.n ?? 0} 片 · {fmtSize(total?.bytes ?? 0)}</> : '加载中…'}
+            {t ? <>{liveBots} / {t.bots.length} 个 Bot 可用, 写入 {liveChans} / {t.channels.length} 个频道, 共 {total?.n ?? 0} 片 · {fmtSize(total?.bytes ?? 0)}</> : <span className="inline-flex items-center gap-1.5"><Icon name="spinner" className="size-3.5 animate-spin" />加载中…</span>}
           </div>
         </div>
         <div className="flex gap-1.5">

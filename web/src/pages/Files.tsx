@@ -255,7 +255,7 @@ export function Files({ path, go, onChange }: { path: string; go: (p: string) =>
       eyebrow={<Crumbs path={path} go={go} />}
       icon={searching ? 'search' : path === '/' ? 'files' : 'folder'}
       title={searching ? `搜索 “${q}”` : here ?? '全部文件'}
-      meta={loading ? '加载中…' : searching
+      meta={loading ? <span className="inline-flex items-center gap-1.5"><Icon name="spinner" className="size-3.5 animate-spin" />加载中…</span> : searching
         ? <><Meta icon="fileText">{searching.length} 条结果</Meta><button type="button" className="inline-flex items-center gap-1 text-brand hover:underline" onClick={() => setSearching(null)}><Icon name="back" className="size-3.5" />返回目录</button></>
         : <><Meta icon="folder">{dirCount}</Meta><Meta icon="fileText">{list.length - dirCount}</Meta><span className="hidden items-center gap-1 sm:inline-flex"><Icon name="upload" className="size-3.5" />可直接拖入上传</span></>}
     >
