@@ -67,3 +67,31 @@ export function invalidateStats(): void {
   statsCache = null;
   liveCache = null;
 }
+
+/**
+ * WebDAV 配额用的已用字节 (#22, RFC 4331)。只在客户端明确请求 quota 属性时算:
+ * - 根令牌: counters 里维护任务的快照 (stat_bytes, 去重后的 blob 总量), 读 1 行; 没有快照时现算
+ * - 受限令牌: 一条递归 CTE 汇总它子树里文件的大小 (读行 ≈ 子树节点数)
+ * 结果按根目录在 isolate 内缓存 5 分钟。
+ */
+const usedCache = new Map<string, { at: number; bytes: number }>();
+export async function usedBytes(env: Env, rootId: string): Promise<number> {
+  const hit = usedCache.get(rootId);
+  if (hit && now() - hit.at < 300_000) return hit.bytes;
+  let bytes: number;
+  if (rootId === 'root') {
+    const r = await env.DB.prepare("SELECT n FROM counters WHERE name = 'stat_bytes'").first<{ n: number }>();
+    bytes = r ? r.n : (await liveUsage(env)).blobs.bytes;
+  } else {
+    const r = await env.DB.prepare(
+      `WITH RECURSIVE sub(id, kind, size) AS (
+         SELECT id, kind, size FROM nodes WHERE id = ?1 AND deleted_at IS NULL
+         UNION ALL SELECT n.id, n.kind, n.size FROM nodes n JOIN sub ON n.parent_id = sub.id WHERE sub.kind = 'dir' AND n.deleted_at IS NULL LIMIT 200000
+       ) SELECT COALESCE(SUM(size), 0) AS bytes FROM sub WHERE kind = 'file'`,
+    ).bind(rootId).first<{ bytes: number }>();
+    bytes = r?.bytes ?? 0;
+  }
+  if (usedCache.size > 500) usedCache.clear();
+  usedCache.set(rootId, { at: now(), bytes });
+  return bytes;
+}

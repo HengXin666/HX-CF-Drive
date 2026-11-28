@@ -141,5 +141,23 @@ if (sect('mcp')) {
   ok((await fetch(`${BASE}/api/v1/mcp`, { headers: H })).status === 405, 'GET 405 (不开 SSE)');
 }
 
+if (sect('dav')) {
+  const D = `${P}/dav`;
+  await put(D, 'q.bin', 'x'.repeat(1000));
+  const pf = (path, body, auth = H.Authorization) => fetch(`${BASE}/dav${path}`, { method: 'PROPFIND', headers: { Authorization: auth, Depth: '0', 'Content-Type': 'application/xml' }, body });
+  const q = '<?xml version="1.0"?><D:propfind xmlns:D="DAV:"><D:prop><D:quota-used-bytes/><D:quota-available-bytes/></D:prop></D:propfind>';
+  let r = await pf('/', q);
+  let x = await r.text();
+  if (r.headers.get('X-D1-Rows')) meter.push(['PROPFIND quota (根令牌)', r.headers.get('X-D1-Rows')]);
+  ok(r.status === 207 && /<D:quota-used-bytes>\d+<\/D:quota-used-bytes>/.test(x) && /<D:quota-available-bytes>\d+</.test(x), '根令牌 PROPFIND 返回 quota 属性');
+  x = await (await pf('/', '')).text();
+  ok(!/quota/.test(x), '不点名要 quota 时不返回 (不属于 allprop), 不多查询');
+  const t = (await j('POST', '/api/v1/admin/tokens', { name: 'e2e22d', scopes: ['read'], rootPath: D })).body.token;
+  r = await pf('/', q, `Basic ${Buffer.from(`u:${t}`).toString('base64')}`);
+  x = await r.text();
+  if (r.headers.get('X-D1-Rows')) meter.push(['PROPFIND quota (受限令牌, 子树 1 个文件)', r.headers.get('X-D1-Rows')]);
+  ok(/<D:quota-used-bytes>1000<\/D:quota-used-bytes>/.test(x), '受限令牌按自己子树统计已用 (1000 字节)');
+}
+
 console.log(`\n${pass} 项通过`);
 if (meter.length) { console.log('\nD1 实测 (查询 / 行读 / 行写):'); for (const [l, m] of meter) console.log(`  ${l}: ${m}`); }

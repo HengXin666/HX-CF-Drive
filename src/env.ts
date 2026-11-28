@@ -20,6 +20,8 @@ export interface Env {
   PATH_CACHE?: string;
   /** 本地实测: 响应头 X-D1-Rows */
   D1_METER?: string;
+  /** WebDAV 报告的总容量 (GB), 不设为 1 PiB (TG 不限容量) */
+  DAV_QUOTA_GB?: string;
 }
 
 /** 当前请求的身份 */

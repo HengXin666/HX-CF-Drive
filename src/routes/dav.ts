@@ -5,12 +5,14 @@
  */
 import { Hono, type Context } from 'hono';
 import type { AppEnv } from '../env';
+import { num } from '../env';
 import { requireScope } from '../lib/auth';
 import {
   assertAccess, childByName, listChildren, mkdir, moveNode, type NodeRow, resolvePath, trashNode,
 } from '../lib/tree';
 import { HttpError, newId, splitPath } from '../lib/util';
 import { serveNode } from '../services/serve';
+import { usedBytes } from '../services/stats';
 import { uploadStream } from '../services/upload';
 import { copyTree } from './api';
 
@@ -18,6 +20,8 @@ export const dav = new Hono<AppEnv>();
 type C = Context<AppEnv>;
 
 const PREFIX = '/dav';
+/** 没设 DAV_QUOTA_GB 时报告的总容量: TG 不限容量, 报 1 PiB, 客户端显示的剩余空间就是它减已用 */
+const DAV_UNLIMITED = 2 ** 50;
 const rel = (c: C) => decodeURIComponent(new URL(c.req.url).pathname.slice(PREFIX.length) || '/');
 
 function esc(s: string) {
@@ -71,6 +75,13 @@ dav.on('PROPFIND', '/*', requireScope('read'), async (c) => {
   if (!node) return c.body(null, 404);
   const depth = c.req.header('Depth') ?? '1';
   const parts = [propXml(node, path)];
+  // RFC 4331 配额属性不属于 allprop, 只有请求体里点名要了才算 (rclone about, Finder, Windows 资源管理器会要)
+  const body = c.req.header('Content-Length') === '0' ? '' : await c.req.text().catch(() => '');
+  if (node.kind === 'dir' && /quota-(used|available)-bytes/.test(body)) {
+    const used = await usedBytes(c.env, c.get('principal').rootId);
+    const total = num(c.env.DAV_QUOTA_GB, 0) * 1024 ** 3 || DAV_UNLIMITED;
+    parts[0] = parts[0].replace('</D:prop>', `<D:quota-used-bytes>${used}</D:quota-used-bytes><D:quota-available-bytes>${Math.max(0, total - used)}</D:quota-available-bytes></D:prop>`);
+  }
   if (node.kind === 'dir' && depth !== '0') {
     const base = path.endsWith('/') ? path : path + '/';
     for (const ch of await listChildren(c.env, node.id)) parts.push(propXml(ch, base + ch.name));

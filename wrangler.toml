@@ -39,6 +39,8 @@ PATH_CACHE = "1"
 # 1 = 维护时清扫没被任何文件引用的频道消息 (放弃的上传)。多个部署共用一个频道时必须设为 0
 ORPHAN_SWEEP = "1"
 # 对外地址, 生成直链/分享链接时使用 (经 Service Binding 调用时也能拿到公网可用的链接)。不设则用请求的 origin
+# WebDAV 向客户端报告的总容量 (GB, RFC 4331 quota-available-bytes = 总容量 - 已用)。不设时报 1 PiB (TG 不限容量)
+# DAV_QUOTA_GB = "1024"
 # PUBLIC_URL = "https://drive.example.com"
 
 # 机密信息用 `wrangler secret put` 设置, 不要写在这里:
