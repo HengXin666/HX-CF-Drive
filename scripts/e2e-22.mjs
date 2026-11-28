@@ -212,5 +212,33 @@ if (sect('ttl')) {
   }
 }
 
+if (sect('fetch')) {
+  const D = `${P}/fetch`;
+  // 小文件: 远程地址用本服务自己的直链, 不依赖外网
+  const src = await put(`${D}/src`, 'hello.txt', 'hello url');
+  const link = (await j('POST', '/api/v1/fs/link', { id: src.id })).body.url;
+  let r = await j('POST', '/api/v1/fs/fetch', { url: link, path: D, expiresIn: 3600 }, {}, 'fs/fetch 小文件');
+  ok(r.status === 200 && r.body.done && r.body.node.name === 'hello.txt' && r.body.node.expiresAt > Date.now(), `URL 上传小文件一次完成, 文件名取自 URL (${r.body.node?.name})`);
+  ok((await (await fetch(r.body.url)).text()) === 'hello url', '内容一致');
+  ok((await j('POST', '/api/v1/fs/fetch', { url: 'ftp://x/y', path: D })).status === 400, '非 http(s) 400');
+  ok((await j('POST', '/api/v1/fs/fetch', { url: link + 'x', path: D, name: 'bad.txt' })).status === 502, '远程非 2xx 返回 502');
+  // 大文件 (4 片 > 一次 3 片): 先分片传一个 4 片的源文件, 再 URL 上传, 走 /uploads/fetch 续拉
+  const K = 19922944, size = K * 3 + 12345;
+  const buf = new Uint8Array(size); for (let i = 0; i < size; i += 4096) buf[i] = (i / 4096) & 255;
+  const init = (await j('POST', '/api/v1/uploads', { path: `${D}/src`, name: 'big.bin', size })).body;
+  const rcs = [];
+  for (let i = 0; i < init.chunkCount; i++) rcs.push((await (await fetch(`${BASE}/api/v1/uploads/chunk?i=${i}&ticket=${encodeURIComponent(init.ticket)}`, { method: 'PUT', headers: H, body: buf.subarray(i * K, Math.min(size, (i + 1) * K)) })).json()).receipt);
+  const big = (await j('POST', '/api/v1/uploads/commit', { ticket: init.ticket, receipts: rcs })).body.node;
+  const bigUrl = (await j('POST', '/api/v1/fs/link', { id: big.id })).body.url;
+  r = await j('POST', '/api/v1/fs/fetch', { url: bigUrl, path: D, name: 'copy.bin' }, {}, 'fs/fetch 大文件第 1 段 (3 片)');
+  ok(r.status === 200 && r.body.done === false && r.body.receipts.length === 3 && r.body.next === 3 && r.body.chunkCount === 4, `大文件先写 3 片并返回票据 (${JSON.stringify({ s: r.status, n: r.body.next, e: r.body.error })})`);
+  const m = await j('POST', '/api/v1/uploads/fetch', { ticket: r.body.ticket, url: bigUrl, from: r.body.next }, {}, 'uploads/fetch 续拉 1 片');
+  ok(m.status === 200 && m.body.receipts.length === 1 && m.body.next === null, '续拉剩下的 1 片');
+  const cm = await j('POST', '/api/v1/uploads/commit', { ticket: r.body.ticket, receipts: [...r.body.receipts, ...m.body.receipts] });
+  ok(cm.status === 200 && cm.body.node.size === size, 'commit 后大小一致');
+  const got = new Uint8Array(await (await fetch(cm.body.url)).arrayBuffer());
+  ok(got.length === size && got.every((v, i) => v === buf[i]), '大文件内容逐字节一致');
+}
+
 console.log(`\n${pass} 项通过`);
 if (meter.length) { console.log('\nD1 实测 (查询 / 行读 / 行写):'); for (const [l, m] of meter) console.log(`  ${l}: ${m}`); }

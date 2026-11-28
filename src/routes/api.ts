@@ -11,6 +11,7 @@ import {
 } from '../lib/tree';
 import { HttpError, newId, now, sha256Hex } from '../lib/util';
 import { runMaintenance } from '../services/maintenance';
+import { checkUrl, fetchMore, fetchStart } from '../services/fetchurl';
 import { cachedStats, invalidateStats, liveUsage, putStats, STAT_KEYS, usageFromCounters } from '../services/stats';
 import { ensureParts, IMMUTABLE, loadBlob, serveNode } from '../services/serve';
 import { commitUpload, foldReceipts, initUpload, openTicket, openTicketBare, putChunk, uploadStream } from '../services/upload';
@@ -322,6 +323,27 @@ api.post('/fs/expire', requireScope('write'), async (c) => {
   await c.env.DB.prepare('UPDATE nodes SET expires_at = ? WHERE id = ?').bind(at, node.id).run();
   forgetNode(node.id);
   return c.json({ node: publicNode({ ...node, expires_at: at }) });
+});
+
+/**
+ * URL 远程上传 (#22): { url, path | parentId, name?, overwrite?, expiresIn? }。Worker 拉远程内容流式写 TG。
+ * 一次最多 FETCH_CHUNKS 片; 更大的返回 { done:false, ticket, receipts, next }, 客户端用 /uploads/fetch 续拉, 再 /uploads/commit。
+ */
+api.post('/fs/fetch', requireScope('write'), async (c) => {
+  const b = await c.req.json<{ url: string; parentId?: string; path?: string; name?: string; overwrite?: boolean; expiresIn?: number }>();
+  const url = checkUrl(b.url);
+  const expiresAt = ttlAt(b.expiresIn);
+  const p = c.get('principal');
+  const parent = b.parentId ? await locate(c, b.parentId) : await mkdirp(c.env, p.rootId, b.path ?? '/');
+  const r = await fetchStart(c.env, p, url, { parentId: parent.id, parent, name: b.name, overwrite: b.overwrite, expiresAt });
+  if (r.done) return c.json({ done: true, node: publicNode(r.node), url: await linkFor(c, r.node) });
+  return c.json(r);
+});
+
+/** URL 远程上传续拉: { ticket, url, from } → { receipts, next } (next 为 null 表示拉完了) */
+api.post('/uploads/fetch', requireScope('write'), async (c) => {
+  const b = await c.req.json<{ ticket: string; url: string; from: number }>();
+  return c.json(await fetchMore(c.env, c.get('principal'), b.ticket, checkUrl(b.url), Number(b.from)));
 });
 
 /** 第 1 步: 申请上传。带 sha256 时可能直接秒传完成 */

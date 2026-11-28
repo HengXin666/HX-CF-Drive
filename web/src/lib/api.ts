@@ -72,6 +72,34 @@ export const fs = {
     api<{ ok: number; failed: { id: string; error: string }[]; nodes?: Node[] }>('POST', '/fs/batch', b),
   /** 设置 / 取消到期时间 (#22): expiresIn 秒, null 取消 */
   expire: (id: string, expiresIn: number | null) => api<{ node: Node }>('POST', '/fs/expire', { id, expiresIn }),
+  /**
+   * URL 远程上传 (#22): 服务端拉远程内容写进 TG。一次最多 3 片, 更大的用 /uploads/fetch 续拉 (远程要支持 Range), 最后 commit。
+   * 限 256 片 (≈ 4.7 GB) 以内; 每段失败重试 3 次 (429 按 Retry-After 等)
+   */
+  fetchUrl: async (url: string, path: string, o: { name?: string; expiresIn?: number } = {}, onProgress?: (done: number, total: number) => void) => {
+    type Start = { done: true; node: Node; url: string } | { done: false; ticket: string; chunkCount: number; receipts: string[]; next: number };
+    const r = await api<Start>('POST', '/fs/fetch', { url, path, name: o.name || undefined, expiresIn: o.expiresIn || undefined });
+    if (r.done) return { node: r.node, url: r.url };
+    if (r.chunkCount > 256) throw new Error('文件超过 256 片 (约 4.7 GB), 请用 API 分批 fold 后提交');
+    const receipts = [...r.receipts];
+    let next: number | null = r.next;
+    while (next !== null) {
+      onProgress?.(receipts.length, r.chunkCount);
+      for (let tries = 0; ; tries++) {
+        try {
+          const m: { receipts: string[]; next: number | null } = await api('POST', '/uploads/fetch', { ticket: r.ticket, url, from: next });
+          receipts.push(...m.receipts);
+          next = m.next;
+          break;
+        } catch (e) {
+          if (tries >= 3) throw e;
+          await new Promise((ok) => setTimeout(ok, ((e as ApiError).retryAfter ?? 3) * 1000));
+        }
+      }
+    }
+    onProgress?.(receipts.length, r.chunkCount);
+    return api<{ node: Node; url: string }>('POST', '/uploads/commit', { ticket: r.ticket, receipts });
+  },
   /** 批量签直链 (每次最多 200 个), 不是文件或无权访问的 id 进 missing */
   links: (ids: string[], expiresIn = 0) => api<{ items: { id: string; name: string; mime: string | null; url: string }[]; missing: string[] }>('POST', '/fs/links', { ids, expiresIn }),
 };

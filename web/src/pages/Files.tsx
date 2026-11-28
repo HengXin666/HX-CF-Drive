@@ -16,6 +16,7 @@ import { type Category, CATEGORIES, CATEGORY_LABEL, categoryOf } from '../../../
 import type { IconName } from '../icons';
 import { fromClipboard, fromDrop, fromInput } from '../lib/picker';
 import { download } from '../lib/transfer';
+import { getPrefs } from '../lib/compress';
 import {
   Button, cn, confirmDialog, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger, Input, toast,
 } from '../ui';
@@ -262,6 +263,30 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
       changed();
     },
   });
+  /** URL 远程上传 (#22): 服务端去拉, 浏览器不经手内容; 上传设置里的 TTL 同样生效 */
+  const fromUrl = () => setPrompt({
+    title: '从 URL 上传',
+    note: '由服务端拉取远程文件写进 Telegram, 浏览器不下载内容。超过约 57 MB 时远程需要支持 Range, 会分段拉取。',
+    fields: [
+      { key: 'url', label: '文件地址', placeholder: 'https://example.com/a.zip' },
+      { key: 'name', label: '保存为 (可选)', placeholder: '留空取 URL 里的文件名', value: '' },
+    ],
+    okText: '开始',
+    onOk: async (v) => {
+      const url = v.url.trim();
+      if (!/^https?:\/\//i.test(url)) throw new Error('只支持 http(s) 地址');
+      const id = toast.loading('正在拉取…');
+      void (async () => { try {
+        const ttl = getPrefs().ttl;
+        const r = await fs.fetchUrl(url, path, { name: v.name.trim(), expiresIn: ttl > 0 ? ttl : undefined },
+          (d, t) => toast.loading(`正在拉取… ${d} / ${t} 片`, { id }));
+        toast.success(`已上传 ${r.node.name}`, { id });
+        changed();
+      } catch (e) {
+        toast.error((e as Error).message, { id });
+      } })();
+    },
+  });
   const mkdir = () => setPrompt({
     title: '新建目录', fields: [{ key: 'name', label: '目录名' }],
     onOk: async (v) => { await fs.mkdir(joinPath(path, v.name.trim())); changed(); },
@@ -455,6 +480,7 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
         <DropdownMenuContent align="end" className="min-w-44">
           <DropdownMenuItem onSelect={() => picker.current?.click()}><Icon name="upload" /> 上传文件</DropdownMenuItem>
           <DropdownMenuItem onSelect={() => dirPicker.current?.click()}><Icon name="folderUp" /> 上传文件夹</DropdownMenuItem>
+          <DropdownMenuItem onSelect={fromUrl}><Icon name="globe" /> 从 URL 上传…</DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={() => setSettings(true)}><Icon name="settings" /> 上传设置 (压缩 / WebP)…</DropdownMenuItem>
           <DropdownMenuItem disabled><Icon name="clipboard" /> 也可以 Ctrl+V 粘贴</DropdownMenuItem>

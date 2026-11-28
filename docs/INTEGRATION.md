@@ -38,6 +38,7 @@ curl -X POST -H "Authorization: Bearer $ADMIN" -H "Content-Type: application/jso
 | POST | `/api/v1/fs/link` `{id, expiresIn}` | 签名直链, expiresIn 秒, 0 为永久 |
 | POST | `/api/v1/fs/batch` `{op, ids \| items, toPath, overwrite}` | 批量 move / copy / delete / restore / rename, 一个 D1 batch; 失败项在 `failed` |
 | POST | `/api/v1/fs/links` `{ids, expiresIn}` | 批量签直链 (≤ 200 个), 无效 id 进 `missing` |
+| POST | `/api/v1/fs/fetch` `{url, path或parentId, name, overwrite, expiresIn}` | URL 远程上传: Worker 拉远程内容流式写进 TG。≤ 3 片 (≈ 57 MiB) 一次完成, 返回 `{done:true, node, url}`; 更大的返回 `{done:false, ticket, receipts, next, chunkCount}`, 接着用 `POST /api/v1/uploads/fetch {ticket, url, from: next}` 续拉 (远程须支持 Range), 拿到 `next: null` 后把全部回执交给 `/uploads/commit`。远程非 2xx 返回 502, 没有 Content-Length 时限 1 片 |
 | POST | `/api/v1/fs/expire` `{id或path, expiresIn}` | 文件到期自动删除 (TTL): expiresIn 秒 (60 ~ 10 年), `null` 取消; 到期后访问返回 410, 定时维护移进回收站 (目录连同内容)。上传接口 (`/upload?expiresIn=`, `/uploads` 的 `expiresIn`, MCP `upload`) 也能直接带 |
 | GET | `/api/v1/fs/manifest?id=` | 分片清单 `{size, chunkSize, chunks: [{bot, fileId, size}]}`; 持有对应 Bot 令牌的客户端可直接从 TG 拉取 (read, 只限自己的子树; file_id 没有 Bot 令牌用不了) |
 | GET | `/api/v1/files/:id/content` | 读取内容, 支持 Range, `?download=1` |

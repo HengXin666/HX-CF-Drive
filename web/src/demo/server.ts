@@ -243,6 +243,27 @@ on('POST', '/uploads/commit', 'write', async (c) => {
   return json(200, { node: publicNode(node), url: fileLink(node) });
 });
 
+// URL 远程上传 (#22), 同 /fs/fetch。演示版在浏览器里直接 fetch (远程要允许 CORS), 一次拉完, 不分段
+on('POST', '/fs/fetch', 'write', async (c) => {
+  const b = await c.body();
+  let u: URL;
+  try { u = new URL(String(b.url ?? '')); } catch { throw new HttpError(400, 'bad url'); }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new HttpError(400, 'only http(s) urls');
+  const expiresAt = ttlAt(b.expiresIn);
+  const parent = str(b.parentId) ? locate(b.parentId) : mkdirp(str(b.path) ?? '/');
+  const r = await fetch(u).catch(() => null);
+  if (!r) throw new HttpError(502, 'remote unreachable (demo: needs CORS)');
+  if (!r.ok) throw new HttpError(502, `remote responded ${r.status}`);
+  const data = await r.blob();
+  if (data.size > 100 * 1024 * 1024) throw new HttpError(413, 'demo url upload limited to 100 MB');
+  let name = str(b.name)?.trim() ?? '';
+  if (!name) { try { name = decodeURIComponent(u.pathname.split('/').pop() ?? ''); } catch { name = ''; } }
+  name = name.replace(/[\\/]/g, '_') || 'download';
+  const node = await putFile(parent.id, name, data, r.headers.get('Content-Type'), !!b.overwrite, expiresAt);
+  return json(200, { done: true, node: publicNode(node), url: fileLink(node) });
+});
+on('POST', '/uploads/fetch', 'write', () => { throw new HttpError(400, 'demo url upload is single-shot'); });
+
 // 一次性上传: multipart 字段 file (可多个), 或原始 body + ?name=
 on('POST', '/upload', 'write', async ({ req, url }) => {
   const parent = mkdirp(url.searchParams.get('path') ?? '/');
