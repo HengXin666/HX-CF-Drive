@@ -80,6 +80,10 @@ export async function childByName(env: Env, parentId: string, name: string): Pro
     .first<NodeRow>();
 }
 
+/** 模块级 Collator: 比较函数里带 options 调 localeCompare 每次都要查找 collator, 大目录排序是 CPU 热点 (#23) */
+const COLL = new Intl.Collator(undefined, { sensitivity: 'base' });
+export const byKindName = (a: NodeRow, b: NodeRow) => (a.kind === b.kind ? COLL.compare(a.name, b.name) : a.kind < b.kind ? -1 : 1);
+
 export async function listChildren(env: Env, parentId: string): Promise<NodeRow[]> {
   const r = await env.DB.prepare(
     'SELECT * FROM nodes WHERE parent_id = ? AND deleted_at IS NULL',
@@ -87,7 +91,20 @@ export async function listChildren(env: Env, parentId: string): Promise<NodeRow[
     .bind(parentId)
     .all<NodeRow>();
   // 排序放在 JS 里做, SQL 不建临时 B 树, 少算一倍行读
-  return r.results.sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }): a.kind < b.kind ? -1 : 1));
+  return r.results.sort(byKindName);
+}
+
+/**
+ * 分页列目录: 沿 (parent_id, name) 唯一索引按名字的字节序往后走, 每页读行 ≤ limit + 1。
+ * 顺序和 listChildren 不同 (不分目录/文件, 不按 locale), 换来不用读全目录。after 为上一页最后一个名字。
+ */
+export async function listChildrenPage(env: Env, parentId: string, limit: number, after = ''): Promise<{ items: NodeRow[]; next: string | null }> {
+  const r = await env.DB.prepare('SELECT * FROM nodes WHERE parent_id = ? AND deleted_at IS NULL AND name > ? ORDER BY name LIMIT ?')
+    .bind(parentId, after, limit + 1)
+    .all<NodeRow>();
+  const more = r.results.length > limit;
+  const items = more ? r.results.slice(0, limit) : r.results;
+  return { items, next: more ? items[items.length - 1].name : null };
 }
 
 const COLS = 'id, parent_id, name, kind, size, mime, blob_id, created_at, updated_at, deleted_at';

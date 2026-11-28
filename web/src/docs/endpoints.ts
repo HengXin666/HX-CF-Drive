@@ -16,7 +16,7 @@ export const GROUPS: Group[] = [
     id: 'fs', title: '文件与目录',
     note: '节点可用 id 或 path 定位, 路径相对令牌的根目录。',
     items: [
-      { method: 'GET', path: '/api/v1/fs/list?path=/photos', scope: 'read', desc: '列目录', resp: '{"node":{...},"path":"/photos","children":[Node]}' },
+      { method: 'GET', path: '/api/v1/fs/list?path=/photos', scope: 'read', desc: '列目录 (全部子项, 目录在前)。可选分页: &limit=200 (1~1000) 按名字字节序返回一页并给出 next, 下一页带 &after=<next>, 每页只读 limit+1 行', resp: '{"node":{...},"path":"/photos","children":[Node],"next":"b.png"}' },
       { method: 'GET', path: '/api/v1/fs/stat?path=/a.png', scope: 'read', desc: '节点信息', resp: '{"node":Node}' },
       { method: 'POST', path: '/api/v1/fs/mkdir', scope: 'write', desc: '逐级创建目录', body: '{"path":"/photos/2026"}' },
       { method: 'POST', path: '/api/v1/fs/move', scope: 'write', desc: '移动或重命名', body: '{"path":"/a.png","toPath":"/photos","name":"b.png","overwrite":false}' },

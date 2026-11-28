@@ -6,7 +6,7 @@ import { activeChannels, allBots, invalidateBotCache, invalidateChannelCache, tg
 import { forgetToken, requireScope } from '../lib/auth';
 import { signLink } from '../lib/sign';
 import {
-  assertAccess, getNode, getNodeAccessCached, getNodeWithAncestors, listChildren, mkdirp, moveNode, type NodeRow, pathFor, pathsOf, publicNode, resolvePath, trashNode,
+  assertAccess, getNode, getNodeAccessCached, getNodeWithAncestors, listChildren, listChildrenPage, mkdirp, moveNode, type NodeRow, pathFor, pathsOf, publicNode, resolvePath, trashNode,
   pathOf,
 } from '../lib/tree';
 import { HttpError, newId, now, sha256Hex } from '../lib/util';
@@ -51,9 +51,19 @@ const linkFor = (c: C, node: NodeRow, expiresInSec = 0) => fileLink(c.env, publi
 
 // ---------------- 目录 ----------------
 
+/**
+ * 列目录。不带 limit: 全部子项, 目录在前按名字排序 (原行为)。
+ * 带 limit (1~1000): 分页, 按名字字节序, ?after=<上一页的 next> 取下一页, 每页只读 limit + 1 行。
+ */
 api.get('/fs/list', requireScope('read'), async (c) => {
   const node = await locate(c, c.req.query('id'), c.req.query('path'));
   if (node.kind !== 'dir') return c.json({ node: publicNode(node), children: [] });
+  const limit = c.req.query('limit');
+  if (limit !== undefined) {
+    const n = Math.min(Math.max(Math.floor(Number(limit)) || 0, 1), 1000);
+    const page = await listChildrenPage(c.env, node.id, n, c.req.query('after') ?? '');
+    return c.json({ node: publicNode(node), path: await pathFor(c.env, node), children: page.items.map(publicNode), next: page.next });
+  }
   const children = await listChildren(c.env, node.id);
   return c.json({ node: publicNode(node), path: await pathFor(c.env, node), children: children.map(publicNode) });
 });
