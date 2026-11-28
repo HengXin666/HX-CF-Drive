@@ -39,19 +39,23 @@ node scripts/hxd.mjs share /a.zip [密码] [天数]
 
 | 操作 | 请求 |
 | --- | --- |
-| 列目录 | `GET /api/v1/fs/list?path=/a` |
+| 当前令牌 | `GET /api/v1/me` → `{"scopes":["read","write"],"rootId":"..."}` (不查库; 先用它判断能做什么, 别靠 403 试探) |
+| 列目录 | `GET /api/v1/fs/list?path=/a`; 大目录分页: `&limit=1~1000`, 响应带 `next`, 下一页加 `&after=<next>`, 没有 `next` 即结束 |
 | 节点信息 | `GET /api/v1/fs/stat?path=/a/b.png` |
 | 建目录 | `POST /api/v1/fs/mkdir {"path":"/a/b"}` |
 | 移动/重命名 | `POST /api/v1/fs/move {"path":"/x","toPath":"/dir","name":"y","overwrite":false}` |
 | 删除 | `POST /api/v1/fs/delete {"path":"/x"}` (进回收站, 可 restore) |
-| 搜索 | `GET /api/v1/fs/search?q=kw` (每令牌每分钟 6 次) |
+| 搜索 | `GET /api/v1/fs/search?q=kw` (扫整个令牌子树, 每令牌每分钟 6 次; 已知目录时优先 list 后本地过滤) |
 | 直链 | `POST /api/v1/fs/link {"path":"/x","expiresIn":0}` → `{"url"}` |
 | 分片清单 | `GET /api/v1/fs/manifest?id=<id>` → `{"size","chunkSize","chunks":[{"bot","fileId","size"}]}` |
-| 读内容 | `GET /api/v1/files/<id>/content` (支持 Range) |
+| 读内容 | `GET /api/v1/files/<id>/content` (支持 Range); 带 `?v=<version>` 且等于当前版本时回 `immutable`, 可长期缓存 |
 | 小文件上传 | `POST /api/v1/upload?path=/dir&rename=1` multipart 字段 `file` |
 | 分享 | `POST /api/v1/shares {"path":"/x","password":"","expiresIn":604800}` |
 
-节点 (Node) 字段: `id, name, kind ("dir"|"file"), size, mime, parentId, createdAt, updatedAt` (毫秒时间戳)。
+节点 (Node) 字段: `id, name, kind ("dir"|"file"), size, mime, parentId, createdAt, updatedAt` (毫秒时间戳), `version` (文件内容版本, 即内容哈希 id; 覆盖上传后会变, 目录为 null)。
+
+- 分页时顺序是名字的字节序 (不再目录在前); 不传 `limit` 时一次返回全部, 目录在前, 名字不分大小写排序。
+- 缓存: 用 `version` 当缓存键; `ETag` 也是它, 回传 `If-None-Match` (可带 `W/` 前缀或多个值) 内容没变得 304。
 
 ### 大文件上传 (> 19 MiB 必须这样)
 
