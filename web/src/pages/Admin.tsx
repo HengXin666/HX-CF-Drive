@@ -38,7 +38,7 @@ export function Admin({ onStats }: { onStats: (s: Stats) => void }) {
   // fresh: 后台操作之后强制重拉; 首次打开复用侧栏刚拉过的用量 (见 admin.stats)
   const load = useCallback(async (fresh = false) => {
     try {
-      const [s, t] = await Promise.all([admin.stats(fresh), admin.tokens()]);
+      const [s, t] = await Promise.all([admin.stats(fresh), admin.tokens(fresh)]);
       setStats(s);
       setTokens(t.items);
       onStats(s);

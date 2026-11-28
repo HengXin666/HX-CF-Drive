@@ -196,6 +196,21 @@ export async function pathsOf(env: Env, nodes: NodeRow[]): Promise<Map<string, {
   return out;
 }
 
+/**
+ * 按 id 批量求路径 (#23, 如令牌根目录): 给每个 id 造一个名字为空的虚拟子节点交给 pathsOf, 一条递归 CTE 查完。
+ * 祖先已删除/断链的退回 pathOf (保持原来"照样给出完整路径"的行为, 这种情况很少)。
+ */
+export async function pathsOfIds(env: Env, ids: string[]): Promise<Map<string, string>> {
+  const uniq = [...new Set(ids)];
+  const m = await pathsOf(env, uniq.map((id) => ({ id: `\u0000${id}`, parent_id: id, name: '' }) as NodeRow));
+  const out = new Map<string, string>();
+  for (const id of uniq) {
+    const e = m.get(`\u0000${id}`);
+    out.set(id, e && !e.dead ? e.path : await pathOf(env, id));
+  }
+  return out;
+}
+
 /** 节点是否位于 ancestorId 之下 (含自身)。用递归 CTE 一次查完 */
 export async function isWithin(env: Env, nodeId: string, ancestorId: string): Promise<boolean> {
   if (ancestorId === 'root' || nodeId === ancestorId) return true;

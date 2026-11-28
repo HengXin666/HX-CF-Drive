@@ -98,6 +98,7 @@ export const me = () => api<Me>('GET', '/me');
 // 侧栏和后台页都要用量: 30 秒内共用同一个请求 (含进行中的), 后台操作后传 fresh 强制重拉
 let statsReq: { at: number; p: Promise<Stats> } | null = null;
 const STATS_TTL = 30_000;
+let tokensReq: { tok: string | null; p: Promise<{ items: TokenRow[] }> } | null = null;
 
 export const admin = {
   stats: (fresh = false) => {
@@ -111,9 +112,17 @@ export const admin = {
   removeBot: (id: string) => api('DELETE', `/admin/bots/${id}`),
   addChannel: (id: string) => api<{ title: string; bots: Record<string, string> }>('POST', '/admin/channels', { id }),
   setChannel: (id: string, status: string) => api('PATCH', `/admin/channels/${id}`, { status }),
-  tokens: () => api<{ items: TokenRow[] }>('GET', '/admin/tokens'),
-  addToken: (name: string, scopes: string[], rootPath: string) => api<{ token: string }>('POST', '/admin/tokens', { name, scopes, rootPath }),
-  removeToken: (id: string) => api('DELETE', `/admin/tokens/${id}`),
+  /** 令牌列表在本次会话内缓存 (#23, 文件页每次进入都要用它做删除/移动提醒); 增删令牌后自动作废, fresh 强制重拉 */
+  tokens: (fresh = false) => {
+    const tok = auth.get();
+    if (!fresh && tokensReq && tokensReq.tok === tok) return tokensReq.p;
+    const p = api<{ items: TokenRow[] }>('GET', '/admin/tokens');
+    const cur = (tokensReq = { tok, p });
+    p.catch(() => { if (tokensReq === cur) tokensReq = null; });
+    return p;
+  },
+  addToken: (name: string, scopes: string[], rootPath: string) => api<{ token: string }>('POST', '/admin/tokens', { name, scopes, rootPath }).finally(() => { tokensReq = null; }),
+  removeToken: (id: string) => api('DELETE', `/admin/tokens/${id}`).finally(() => { tokensReq = null; }),
   maintenance: () => api<Record<string, number>>('POST', '/admin/maintenance'),
   /** check=true 时逐对检查 Bot 在频道里的管理员权限 (花 TG 子请求); fresh=true 时重新统计分片 */
   topology: (check = false, fresh = false) => api<Topology>('GET', `/admin/topology?check=${check ? 1 : 0}&fresh=${fresh ? 1 : 0}`),

@@ -7,7 +7,7 @@ import { forgetToken, requireScope } from '../lib/auth';
 import { signLink } from '../lib/sign';
 import {
   assertAccess, getNode, getNodeAccessCached, getNodeWithAncestors, listChildren, listChildrenPage, mkdirp, moveNode, type NodeRow, pathFor, pathsOf, publicNode, resolvePath, trashNode,
-  pathOf, subtree,
+  pathsOfIds, subtree,
 } from '../lib/tree';
 import { HttpError, newId, now, sha256Hex } from '../lib/util';
 import { runMaintenance } from '../services/maintenance';
@@ -519,7 +519,9 @@ api.post('/admin/tokens', requireScope('admin'), async (c) => {
 api.get('/admin/tokens', requireScope('admin'), async (c) => {
   const r = await c.env.DB.prepare('SELECT id, name, scopes, root_id, expires_at, created_at FROM tokens ORDER BY created_at DESC').all<{ root_id: string }>();
   // 带上根目录的路径: 前端删除或移出某个令牌的根目录时据此提醒 (持有令牌的服务会找不到文件)
-  const items = await Promise.all(r.results.map(async (t) => ({ ...t, root_path: await pathOf(c.env, t.root_id) })));
+  // 所有根目录的路径一条递归 CTE 批量求 (#23, 原来每个令牌一次 pathOf)
+  const paths = await pathsOfIds(c.env, r.results.map((t) => t.root_id));
+  const items = r.results.map((t) => ({ ...t, root_path: paths.get(t.root_id) ?? '/' }));
   return c.json({ items });
 });
 
