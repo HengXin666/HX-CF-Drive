@@ -1,6 +1,7 @@
 // 文件浏览: 路径眉标, 上传 (拖放/选择), 新建目录, 搜索, 预览, 下载, 直链, 分享, 重命名, 移动 (目录树), 删除, 多选批量操作
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Icon, IconButton } from '../components/Icon';
+import { ImageCell } from '../components/ImageCell';
 import { MoveDialog } from '../components/MoveDialog';
 import { Preview, type PreviewTarget } from '../components/Preview';
 import { PromptDialog, type PromptRequest } from '../components/PromptDialog';
@@ -9,6 +10,7 @@ import { type Column, DataTable } from '../components/Table';
 import { UploadQueue, useUploadQueue } from '../components/UploadQueue';
 import { fileIcon } from '../icons';
 import { admin, ApiError, fmtSize, fmtTime, fs, joinPath, type Node, shares, type TokenRow } from '../lib/api';
+import { isImage, load as loadImage, peek, usePrefs, wantsPreview } from '../lib/imgcache';
 import { download } from '../lib/transfer';
 import {
   Button, cn, confirmDialog, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger, Input, toast,
@@ -68,6 +70,7 @@ export function Files({ path, go, onChange }: { path: string; go: (p: string) =>
   const [moving, setMoving] = useState<Item[] | null>(null);
   const [preview, setPreview] = useState<PreviewTarget | null>(null);
   const [drag, setDrag] = useState(false);
+  const [img, setImg] = usePrefs();
   const picker = useRef<HTMLInputElement>(null);
   // 只有管理员能列令牌; 其他令牌拿不到就当没有
   const [tokens, setTokens] = useState<TokenRow[]>([]);
@@ -100,11 +103,27 @@ export function Files({ path, go, onChange }: { path: string; go: (p: string) =>
 
   const full = (n: Node): Item => ({ ...n, fullPath: n.path ?? joinPath(path, n.name) });
   const save = async (n: Node) => {
+    // 列表或预览里已经加载过的图片直接存, 不再请求
+    const cached = isImage(n) ? peek(n) : null;
+    if (cached) {
+      const a = document.createElement('a');
+      a.href = cached;
+      a.download = n.name;
+      a.click();
+      return;
+    }
     const { url } = await fs.link(n.id, 3600);
     await download(url, n.name, n.size, () => {});
   };
   const open = async (n: Node) => {
     if (n.kind === 'dir') { go(full(n).fullPath); return; }
+    if (isImage(n)) {
+      // 图片走缓存: 命中直接显示, 没命中取一次原图并留在缓存里, 下次点开不再请求; 不签直链
+      setPreview({ node: n, url: peek(n) ?? '' });
+      const url = await loadImage(n);
+      setPreview((p) => (p?.node.id === n.id ? { node: n, url } : p));
+      return;
+    }
     const { url } = await fs.link(n.id, 3600);
     if (/^(image|video|audio)\//.test(n.mime ?? '') || n.mime === 'application/pdf' || n.mime?.startsWith('text/')) setPreview({ node: n, url });
     else await download(url, n.name, n.size, () => {});
@@ -180,7 +199,7 @@ export function Files({ path, go, onChange }: { path: string; go: (p: string) =>
       const fi = fileIcon(n.kind, n.mime, n.name);
       return (
         <span className="flex min-w-0 items-center gap-2.5 sm:min-w-64">
-          <Icon as={fi.icon} className={fi.tone} />
+          {wantsPreview(n, img) ? <ImageCell node={n} fallback={<Icon as={fi.icon} className={fi.tone} />} /> : <Icon as={fi.icon} className={fi.tone} />}
           <span className="grid min-w-0">
             <span className="truncate">{n.name}</span>
             {/* 窄屏隐藏了大小和时间两列, 放到名字下面 */}
@@ -262,6 +281,24 @@ export function Files({ path, go, onChange }: { path: string; go: (p: string) =>
                 <Input size="sm" className="w-40 sm:w-60" leading={<Icon name="search" />} placeholder="搜索全部文件" aria-label="搜索全部文件"
                   value={q} onChange={(e) => setQ(e.target.value)} />
               </form>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="sm" variant={img.on ? 'secondary' : 'outline'} aria-label="图片预览">
+                    <Icon name="image" /><span className="hidden sm:inline">{img.on ? `预览 ≤ ${img.maxMB} MB` : '图片预览'}</span>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="min-w-48">
+                  <DropdownMenuItem onSelect={() => setImg({ ...img, on: !img.on })}>
+                    <Icon name={img.on ? 'close' : 'eye'} /> {img.on ? '关闭图片预览' : '在列表里显示图片'}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  {[1, 2, 5, 10, 20].map((mb) => (
+                    <DropdownMenuItem key={mb} onSelect={() => setImg({ on: true, maxMB: mb })}>
+                      <Icon name={img.on && img.maxMB === mb ? 'check' : 'image'} /> 只显示 ≤ {mb} MB 的图片
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
               <Button size="sm" variant="outline" aria-label="新建目录" onClick={() => setPrompt({
                 title: '新建目录', fields: [{ key: 'name', label: '目录名' }],
                 onOk: async (v) => { await fs.mkdir(joinPath(path, v.name.trim())); changed(); },

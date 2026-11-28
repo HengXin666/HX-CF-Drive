@@ -3,6 +3,7 @@ import { File, HardDrive, Send } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { Shell, type NavItem } from './components/Shell';
 import { admin, auth, fmtSize, type Stats } from './lib/api';
+import { clearImages } from './lib/imgcache';
 import { Admin } from './pages/Admin';
 import { ApiDocs } from './pages/ApiDocs';
 import { Files } from './pages/Files';
@@ -52,7 +53,7 @@ export function App() {
       items={items}
       active={page}
       onNav={(id) => nav(id === 'files' ? '/files/' : `/${id}`)}
-      onLogout={() => { auth.clear(); setAuthed(false); }}
+      onLogout={() => { auth.clear(); void clearImages(); setAuthed(false); }}
       usage={stats && (
         <div className="flex items-center gap-3">
           <span className="grid size-8 shrink-0 place-items-center rounded-md bg-brand-soft text-brand"><HardDrive className="size-4" /></span>

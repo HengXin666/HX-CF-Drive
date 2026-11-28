@@ -17,8 +17,12 @@ function TextView({ url }: { url: string }) {
 
 export function Preview({ target, onClose, onDownload }: { target: PreviewTarget | null; onClose: () => void; onDownload: (n: Node) => void }) {
   const mime = target?.node.mime ?? '';
+  // 图片来自缓存时是 blob URL, 直接用; 空串表示还在取原图
+  const url = target?.url || undefined;
+  const local = !!url?.startsWith('blob:');
   // 演示模式: 直链只存在于浏览器内的拦截层, 媒体元素先换成 blob URL
-  const src = __DEMO__ ? useDemoSrc(target?.url) : target?.url;
+  const demo = __DEMO__ ? useDemoSrc(local ? undefined : url) : undefined;
+  const src = local ? url : __DEMO__ ? demo : url;
   return (
     <Dialog open={!!target} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="w-[min(92vw,1000px)] max-w-none sm:max-w-none">
@@ -34,7 +38,8 @@ export function Preview({ target, onClose, onDownload }: { target: PreviewTarget
           </DialogTitle>
         </DialogHeader>
         {target && (mime.startsWith('image/') ? (
-          <img src={src} alt={target.node.name} className="max-h-[72vh] w-full rounded-lg object-contain" />
+          src ? <img src={src} alt={target.node.name} className="max-h-[72vh] w-full rounded-lg object-contain" />
+            : <div className="grid h-[40vh] place-items-center text-sm text-muted-foreground">加载原图…</div>
         ) : mime.startsWith('video/') ? (
           <video src={src} controls autoPlay className="max-h-[72vh] w-full rounded-lg bg-black" />
         ) : mime.startsWith('audio/') ? (
