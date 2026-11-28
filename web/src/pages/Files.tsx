@@ -8,7 +8,7 @@ import { Preview, type PreviewTarget } from '../components/Preview';
 import { PromptDialog, type PromptRequest } from '../components/PromptDialog';
 import { Meta, Page } from '../components/Shell';
 import { type Column, DataTable } from '../components/Table';
-import { UploadQueue, useUploadQueue } from '../components/UploadQueue';
+import { UploadQueue, uploads } from '../components/UploadQueue';
 import { fileIcon } from '../icons';
 import { admin, ApiError, fmtSize, fmtTime, fs, joinPath, type Node, shares, type TokenRow } from '../lib/api';
 import { isImage, load as loadImage, peek, usePrefs, wantsPreview } from '../lib/imgcache';
@@ -18,6 +18,9 @@ import {
 } from '../ui';
 
 const parentOf = (p: string) => p.replace(/\/[^/]+\/?$/, '') || '/';
+/** 和服务端 listChildren 一样的顺序: 目录在前, 名字按 locale 不分大小写 */
+const COLL = new Intl.Collator(undefined, { sensitivity: 'base' });
+const byKindName = (a: Node, b: Node) => (a.kind === b.kind ? COLL.compare(a.name, b.name) : a.kind < b.kind ? -1 : 1);
 const within = (p: string, dir: string) => dir === '/' || p === dir || p.startsWith(dir + '/');
 
 /**
@@ -94,7 +97,15 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
   useEffect(() => { setSearching(null); setQ(''); void load(); }, [load]);
   // 用量统计是维护任务写的快照, 文件操作和上传不会让它马上变, 所以这里不再刷新侧栏 (以前每传完一个文件就全表扫一次 nodes + blobs)
   const changed = useCallback(() => { void load(); }, [load]);
-  const uploads = useUploadQueue(changed);
+  // 上传完一个文件: 服务端返回的节点直接插进当前列表 (同名的覆盖), 不再每个文件重新列一次目录
+  const pathRef = useRef(path);
+  pathRef.current = path;
+  useEffect(() => uploads.bind({
+    onUploaded: (node, dir) => {
+      if (dir !== pathRef.current) return;
+      setRows((list) => [...list.filter((x) => x.id !== node.id && x.name !== node.name), node].sort(byKindName));
+    },
+  }), []);
 
   const runSearch = async () => {
     if (!q.trim()) { setSearching(null); return; }
@@ -379,7 +390,7 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
         onMove={(to) => moveTo(moving ?? [], to)}
       />
       <Preview target={preview} onClose={() => setPreview(null)} onDownload={(n) => void save(n)} />
-      <UploadQueue q={uploads} />
+      <UploadQueue />
     </Page>
   );
 }

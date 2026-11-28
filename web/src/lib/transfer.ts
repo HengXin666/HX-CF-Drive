@@ -2,7 +2,7 @@
 // - 上传进度 (凭证 + 回执 + 聚合回执) 存 localStorage, 24 小时内重选同一文件自动续传, 只补传缺的分片
 // - 大文件每凑满一组 256 片就 fold 成一个聚合回执, commit 时不用一次验几千个签名 (#12)
 // - 大文件下载 (File System Access) 每段自动重试, 中断后进度存 IndexedDB, 再点下载接着写 (#13)
-import { api, auth } from './api';
+import { api, ApiError, auth, type Node } from './api';
 import { sha256File } from './sha256';
 import { demoDownload } from '../demo/media';
 
@@ -17,16 +17,43 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export interface UploadOpts { name?: string; overwrite?: boolean }
 
-export async function uploadFile(file: File, dir: string, onProgress: (p: Progress) => void, opts: UploadOpts = {}, concurrency = 2): Promise<void> {
+/**
+ * 小于这个大小的文件走一次性上传 POST /upload: 1 个请求 (分片流程是 init + chunk + commit 3 个), 也不用先算哈希。
+ * 代价是这些小文件没有秒传 (不登记 sha256), 重复上传会再占一份 TG 空间 (都 < 1 MB, 可以接受)。
+ */
+export const SINGLE_MAX = 1024 * 1024;
+
+/** 一次性上传小文件; TG 限流时服务端回 429, 按 Retry-After 重试 (请求体是 Blob, 可以重发) */
+async function uploadSmall(file: File, dir: string, name: string, overwrite: boolean, onProgress: (p: Progress) => void): Promise<Node> {
+  onProgress({ phase: 'upload', ratio: 0 });
+  const q = new URLSearchParams({ path: dir, name, ...(overwrite ? { overwrite: '1' } : {}) });
+  for (let tries = 0; ; tries++) {
+    const r = await fetch(`/api/v1/upload?${q}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${auth.get()}`, ...(file.type ? { 'Content-Type': file.type } : {}) },
+      body: file,
+    }).catch(() => null);
+    const j = r ? ((await r.json().catch(() => ({}))) as { data?: { node: Node }; error?: string }) : {};
+    if (r?.ok && j.data) { onProgress({ phase: 'done', ratio: 1 }); return j.data.node; }
+    const status = r?.status ?? 0;
+    // 409 同名, 4xx 参数错误: 重试没用, 交给队列显示
+    if ((status >= 400 && status < 500 && status !== 429 && status !== 408) || tries >= 8) throw new ApiError(status, j.error ?? `HTTP ${status}`);
+    await sleep(Number(r?.headers.get('Retry-After') || 2 ** Math.min(tries, 5)) * 1000);
+  }
+}
+
+/** 上传一个文件, 返回服务端建好的节点 (调用方直接插进列表, 不用重新列目录) */
+export async function uploadFile(file: File, dir: string, onProgress: (p: Progress) => void, opts: UploadOpts = {}, concurrency = 2): Promise<Node | null> {
   const name = opts.name ?? file.name;
   const key = `hxd_up:${dir}:${name}:${file.size}:${file.lastModified}`;
   let state = JSON.parse(localStorage.getItem(key) ?? 'null') as State | null;
+  if (!state && file.size > 0 && file.size < SINGLE_MAX) return uploadSmall(file, dir, name, !!opts.overwrite, onProgress);
   if (!state) {
     const sha256 = file.size ? await sha256File(file, (r) => onProgress({ phase: 'hash', ratio: r })) : undefined;
-    const init = await api<{ done: boolean; ticket: string; chunkSize: number; chunkCount: number }>('POST', '/uploads', {
+    const init = await api<{ done: boolean; ticket: string; chunkSize: number; chunkCount: number; node?: Node }>('POST', '/uploads', {
       path: dir, name, size: file.size, mime: file.type || undefined, sha256, overwrite: !!opts.overwrite,
     });
-    if (init.done) { onProgress({ phase: 'done', ratio: 1, note: file.size ? '秒传' : undefined }); return; }
+    if (init.done) { onProgress({ phase: 'done', ratio: 1, note: file.size ? '秒传' : undefined }); return init.node ?? null; }
     state = { ticket: init.ticket, chunkSize: init.chunkSize, chunkCount: init.chunkCount, receipts: {} };
     localStorage.setItem(key, JSON.stringify(state));
   }
@@ -74,9 +101,10 @@ export async function uploadFile(file: File, dir: string, onProgress: (p: Progre
   await Promise.all(Array.from({ length: Math.min(concurrency, st.chunkCount) }, worker));
   // 续传时可能有组已经传完但还没折叠 (上次在 fold 前中断)
   for (let g = 0; g < groups; g++) await tryFold(g);
-  await api('POST', '/uploads/commit', { ticket: st.ticket, receipts: Object.values(st.receipts), folds: Object.values(folds) });
+  const res = await api<{ node: Node }>('POST', '/uploads/commit', { ticket: st.ticket, receipts: Object.values(st.receipts), folds: Object.values(folds) });
   localStorage.removeItem(key);
   onProgress({ phase: 'done', ratio: 1 });
+  return res.node;
 }
 
 interface Writable {
