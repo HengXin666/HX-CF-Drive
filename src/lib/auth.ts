@@ -1,6 +1,10 @@
 import type { Context, Next } from 'hono';
 import type { AppEnv, Env, Principal } from '../env';
+import { mkdirp, resolvePath } from './tree';
 import { HttpError, now, safeEqual, sha256Hex } from './util';
+
+/** 调用方可用这个头把本次请求的根目录收窄到令牌根下的某个子目录 (如 HX-AIOA 的网盘只看 /drive) */
+export const SCOPE_HEADER = 'X-Drive-Scope';
 
 /**
  * 从 Authorization: Bearer 或 Basic (WebDAV, 密码即令牌) 中取令牌。
@@ -46,12 +50,26 @@ export function requireScope(scope: 'read' | 'write' | 'admin' | 'stats') {
         const basic = c.req.path.startsWith('/dav');
         throw new HttpError(401, 'unauthorized', basic ? { 'WWW-Authenticate': 'Basic realm="HX-CF-Drive"' } : undefined);
       }
-      p = found;
+      p = await narrowScope(c.env, found, c.req.header(SCOPE_HEADER));
       c.set('principal', p);
     }
     if (!p.scopes.has(scope) && !p.scopes.has('admin')) throw new HttpError(403, `missing scope: ${scope}`);
     await next();
   };
+}
+
+/**
+ * 按 X-Drive-Scope 收窄根目录: 路径相对令牌根, 不存在时有写权限就建出来。
+ * 之后 list, search, 回收站, 分享列表等都按新根隔离, 和令牌本身的根目录一样。
+ */
+export async function narrowScope(env: Env, p: Principal, scope: string | undefined): Promise<Principal> {
+  if (!scope || scope === '/') return p;
+  if (!scope.startsWith('/')) throw new HttpError(400, 'bad scope');
+  let node = await resolvePath(env, p.rootId, scope);
+  if (!node && (p.scopes.has('write') || p.scopes.has('admin'))) node = await mkdirp(env, p.rootId, scope);
+  if (!node) throw new HttpError(404, 'scope not found');
+  if (node.kind !== 'dir') throw new HttpError(409, 'scope is not a dir');
+  return { ...p, rootId: node.id };
 }
 
 /** 令牌是否仍然有效 (直链校验用)。isolate 内缓存 60 秒, 吊销后最多 60 秒内失效 */
