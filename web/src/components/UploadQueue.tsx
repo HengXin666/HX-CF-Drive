@@ -4,9 +4,26 @@
 import { Button, Progress } from '../ui';
 import { lazy, Suspense, useEffect, useState, useSyncExternalStore } from 'react';
 import { ApiError, fmtSize, type Node } from '../lib/api';
+import { compressImage, getPrefs } from '../lib/compress';
 import { type Progress as P, uploadFile, type UploadOpts } from '../lib/transfer';
 
-export interface Item { id: number; file: File; dir: string; p: P; opts?: UploadOpts; error?: string; conflict?: boolean; node?: Node }
+export interface Item { id: number; file: File; dir: string; p: P; opts?: UploadOpts; error?: string; conflict?: boolean; node?: Node; prepared?: boolean; note?: string }
+
+/** 上传前在浏览器里压缩 / 转 WebP (#22, 设置里开启才做); 每个文件只处理一次, 重试不再压 */
+async function prepare(it: Item): Promise<Item> {
+  if (it.prepared) return it;
+  const prefs = getPrefs();
+  let file = it.file;
+  let note: string | undefined;
+  if (prefs.on && it.file.type.startsWith('image/')) {
+    patch(it.id, { p: { phase: 'hash', ratio: 0, note: '压缩中' } });
+    const out = await compressImage(it.file, prefs).catch(() => null);
+    if (out) { file = out; note = `${fmtSize(it.file.size)} → ${fmtSize(out.size)}`; }
+  }
+  const next = { ...it, file, prepared: true, note };
+  patch(it.id, { file, prepared: true, note });
+  return next;
+}
 
 const LinkDialog = lazy(() => import('./LinkDialog').then((m) => ({ default: m.LinkDialog })));
 
@@ -43,14 +60,18 @@ function patch(id: number, d: Partial<Item>, now = true) {
 
 function pump() {
   while (active < parallel() && waiting.length) {
-    const cur = waiting.shift()!;
+    const queued = waiting.shift()!;
     active++;
-    let phase = cur.p.phase;
-    void uploadFile(cur.file, cur.dir, (p) => {
-      // 阶段变化立刻显示, 进度百分比节流
-      patch(cur.id, { p }, p.phase !== phase);
-      phase = p.phase;
-    }, cur.opts).then((node) => {
+    let phase = queued.p.phase;
+    let cur = queued;
+    void prepare(queued).then((it) => {
+      cur = it;
+      return uploadFile(it.file, it.dir, (p) => {
+        // 阶段变化立刻显示, 进度百分比节流
+        patch(it.id, { p }, p.phase !== phase);
+        phase = p.phase;
+      }, it.opts);
+    }).then((node) => {
       if (node) { patch(cur.id, { node }); handlers.onUploaded?.(node, cur.dir); }
     }, (e) => {
       const conflict = e instanceof ApiError && e.status === 409;
@@ -122,7 +143,7 @@ export function UploadQueue() {
               <div className="flex justify-between gap-2">
                 <span className="truncate">{it.opts?.name ?? it.file.name}</span>
                 <span className="shrink-0 font-mono text-muted-foreground">
-                  {fmtSize(it.file.size)} · {it.p.note ?? PHASE[it.p.phase]}
+                  {it.note ?? fmtSize(it.file.size)} · {it.p.note ?? PHASE[it.p.phase]}
                 </span>
               </div>
               {it.p.phase !== 'done' && <Progress className="mt-1.5" size="sm" tone={it.error ? 'destructive' : 'default'} value={it.p.ratio * 100} />}

@@ -20,6 +20,7 @@ import {
 // 弹窗按需加载 (#23): 第一次用到时才下载, 之后一直挂着 (保留关闭动画)
 const MoveDialog = lazy(() => import('../components/MoveDialog').then((m) => ({ default: m.MoveDialog })));
 const LinkDialog = lazy(() => import('../components/LinkDialog').then((m) => ({ default: m.LinkDialog })));
+const UploadSettings = lazy(() => import('../components/UploadSettings').then((m) => ({ default: m.UploadSettings })));
 const Preview = lazy(() => import('../components/Preview').then((m) => ({ default: m.Preview })));
 
 const parentOf = (p: string) => p.replace(/\/[^/]+\/?$/, '') || '/';
@@ -80,9 +81,11 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
   const [moving, setMoving] = useState<Item[] | null>(null);
   const [preview, setPreview] = useState<PreviewTarget | null>(null);
   const [linking, setLinking] = useState<Node[] | null>(null);
+  const [settings, setSettings] = useState(false);
   // 弹窗用过一次才挂载 (懒加载的代码到那时才下载)
-  const used = useRef({ move: false, preview: false, link: false }).current;
+  const used = useRef({ move: false, preview: false, link: false, settings: false }).current;
   if (linking) used.link = true;
+  if (settings) used.settings = true;
   if (moving) used.move = true;
   if (preview) used.preview = true;
   const [drag, setDrag] = useState(false);
@@ -406,6 +409,7 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
                   <DropdownMenuItem onSelect={() => picker.current?.click()}><Icon name="upload" /> 上传文件</DropdownMenuItem>
                   <DropdownMenuItem onSelect={() => dirPicker.current?.click()}><Icon name="folderUp" /> 上传文件夹</DropdownMenuItem>
                   <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={() => setSettings(true)}><Icon name="settings" /> 上传设置 (压缩 / WebP)…</DropdownMenuItem>
                   <DropdownMenuItem disabled><Icon name="clipboard" /> 也可以 Ctrl+V 粘贴</DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -471,6 +475,7 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
             onMove={(to) => moveTo(moving ?? [], to)}
           />
         )}
+        {used.settings && <UploadSettings open={settings} onClose={() => setSettings(false)} />}
         {used.link && <LinkDialog nodes={linking} onClose={() => setLinking(null)} />}
         {used.preview && <Preview target={preview} onClose={() => setPreview(null)} onDownload={(n) => void save(n)} />}
       </Suspense>
