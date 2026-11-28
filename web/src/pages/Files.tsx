@@ -73,6 +73,7 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState('');
   const [searching, setSearching] = useState<Node[] | null>(null);
+  const [searchedQ, setSearchedQ] = useState('');
   const [prompt, setPrompt] = useState<PromptRequest | null>(null);
   const [moving, setMoving] = useState<Item[] | null>(null);
   const [preview, setPreview] = useState<PreviewTarget | null>(null);
@@ -118,6 +119,7 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
     if (!q.trim()) { setSearching(null); return; }
     try {
       setSearching((await fs.search(q.trim())).items);
+      setSearchedQ(q.trim());
     } catch (e) {
       toast.error(e instanceof ApiError && e.status === 429 ? '搜索太频繁, 稍后再试' : (e as Error).message);
     }
@@ -284,17 +286,22 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
   ], [img, isSearch]);
 
   const here = path.split('/').filter(Boolean).pop();
-  const list = searching ?? rows;
+  // 搜索框默认只在当前目录已加载的列表里筛选 (#23, 0 请求); 全盘搜索要点按钮, 走 /fs/search (LIKE 扫全库)
+  const needle = q.trim().toLocaleLowerCase();
+  const filtered = useMemo(() => (needle ? rows.filter((n) => n.name.toLocaleLowerCase().includes(needle)) : rows), [rows, needle]);
+  const list = searching ?? filtered;
   const dirCount = list.filter((n) => n.kind === 'dir').length;
 
   return (
     <Page
       eyebrow={<Crumbs path={path} go={go} />}
       icon={searching ? 'search' : path === '/' ? 'files' : 'folder'}
-      title={searching ? `搜索 “${q}”` : here ?? '全部文件'}
+      title={searching ? `全盘搜索 “${searchedQ}”` : here ?? '全部文件'}
       meta={loading ? <span className="inline-flex items-center gap-1.5"><Icon name="spinner" className="size-3.5 animate-spin" />加载中…</span> : searching
         ? <><Meta icon="fileText">{searching.length} 条结果</Meta><button type="button" className="inline-flex items-center gap-1 text-brand hover:underline" onClick={() => setSearching(null)}><Icon name="back" className="size-3.5" />返回目录</button></>
-        : <><Meta icon="folder">{dirCount}</Meta><Meta icon="fileText">{list.length - dirCount}</Meta><span className="hidden items-center gap-1 sm:inline-flex"><Icon name="upload" className="size-3.5" />可直接拖入上传</span></>}
+        : needle
+          ? <><Meta icon="search">当前目录 {list.length} / {rows.length} 项匹配</Meta><button type="button" className="inline-flex items-center gap-1 text-brand hover:underline" onClick={() => void runSearch()}><Icon name="search" className="size-3.5" />搜索全部文件</button></>
+          : <><Meta icon="folder">{dirCount}</Meta><Meta icon="fileText">{list.length - dirCount}</Meta><span className="hidden items-center gap-1 sm:inline-flex"><Icon name="upload" className="size-3.5" />可直接拖入上传</span></>}
     >
       <div
         className={cn('relative rounded-xl transition-shadow', drag && 'ring-2 ring-brand ring-offset-4 ring-offset-background')}
@@ -319,10 +326,16 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
           selectable
           toolbar={(
             <>
-              <form onSubmit={(e) => { e.preventDefault(); void runSearch(); }}>
-                <Input size="sm" className="w-40 sm:w-60" leading={<Icon name="search" />} placeholder="搜索全部文件" aria-label="搜索全部文件"
-                  value={q} onChange={(e) => setQ(e.target.value)} />
+              {/* 输入即在当前目录筛选; 回车不发请求, 全盘搜索是显式按钮 */}
+              <form onSubmit={(e) => e.preventDefault()}>
+                <Input size="sm" className="w-40 sm:w-60" leading={<Icon name="search" />} placeholder="筛选当前目录" aria-label="筛选当前目录"
+                  value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Escape') setQ(''); }} />
               </form>
+              {needle && !searching && (
+                <Button size="sm" variant="outline" aria-label="搜索全部文件" onClick={() => void runSearch()}>
+                  <Icon name="search" /><span className="hidden sm:inline">全盘搜索</span>
+                </Button>
+              )}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button size="sm" variant={img.on ? 'secondary' : 'outline'} aria-label="图片预览">
