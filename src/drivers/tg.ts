@@ -2,7 +2,7 @@
  * Telegram Bot API 驱动
  * - 上传: sendDocument, 请求体流式拼成 multipart, Worker 不缓冲, 不复制字节
  * - 下载: getFile (≤20MB) 拿 file_path, 再从 /file/bot<token>/<path> 拉取
- * - file_path 和 Bot 冷却状态都放在 isolate 内存里, 不消耗 KV/D1/Cache API
+ * - file_path 和 Bot 冷却状态放在 isolate 内存里; file_path 另在 Cache API 里留一份给别的 isolate (只用于每个响应的第一片, 见 serve.ts)
  * - file_id 只对上传它的 Bot 有效; Bot 失效时用 forwardMessage 让别的 Bot 重新拿 file_id
  */
 import type { Env } from '../env';
@@ -206,19 +206,50 @@ export function cachedPath(botId: string, fileId: string): string | null {
   return hit && now() - hit.at < PATH_TTL ? hit.path : null;
 }
 
-export async function filePath(bot: BotRow, fileId: string): Promise<string> {
+function rememberPath(botId: string, fileId: string, path: string, at = now()) {
+  if (pathCache.size > 20_000) pathCache.clear();
+  pathCache.set(`${botId}:${fileId}`, { path, at });
+}
+
+/** onFresh: 这次是真的调了 getFile (不是内存命中) 时回调, 调用方可以把它写进 Cache API */
+export async function filePath(bot: BotRow, fileId: string, onFresh?: (path: string) => void): Promise<string> {
   const hit = cachedPath(bot.id, fileId);
   if (hit) return hit;
   const f = await tgCall<{ file_path?: string }>(bot.token, 'getFile', { file_id: fileId });
   if (!f.file_path) throw new Error('telegram getFile returned no path');
-  if (pathCache.size > 20_000) pathCache.clear();
-  pathCache.set(`${bot.id}:${fileId}`, { path: f.file_path, at: now() });
+  rememberPath(bot.id, fileId, f.file_path);
+  onFresh?.(f.file_path);
   return f.file_path;
 }
 
+// ---------- file_path 的跨 isolate 缓存 (#23) ----------
+// isolate 常被回收, 同一个热门文件在新 isolate 里每片都要重新 getFile (多 1 个子请求, 吃 Bot 限流, 首字节慢一个 TG 往返)。
+// Cache API 按机房共享, 但每次 match / put 都和 fetch 共用每请求 50 个子请求的额度, 并不比 getFile 便宜,
+// 所以只用在每个响应的第一片上: 命中省一次 TG 往返 (首字节更快), 未命中多花 2 个子请求 (match + put)。
+const PATH_CACHE_SEC = 50 * 60;
+const pathKey = (origin: string, botId: string, fileId: string) => `${origin}/__tgpath/${botId}/${encodeURIComponent(fileId)}`;
+const hasCacheApi = () => typeof caches !== 'undefined' && !!(caches as unknown as { default?: Cache }).default;
+
+/** 从 Cache API 取 file_path, 命中就放进内存缓存。返回是否命中 */
+export async function primePath(origin: string, botId: string, fileId: string): Promise<boolean> {
+  if (!hasCacheApi()) return false;
+  const r = await caches.default.match(pathKey(origin, botId, fileId)).catch(() => undefined);
+  if (!r) return false;
+  const path = await r.text();
+  if (!path) return false;
+  // Cache API 不告诉剩余寿命, 按 "刚写入" 算会超过 file_path 的有效期; 保守地只在内存里留 10 分钟
+  rememberPath(botId, fileId, path, now() - PATH_TTL + 10 * 60_000);
+  return true;
+}
+
+export function storePath(origin: string, botId: string, fileId: string, path: string): Promise<void> {
+  if (!hasCacheApi()) return Promise.resolve();
+  return caches.default.put(pathKey(origin, botId, fileId), new Response(path, { headers: { 'Cache-Control': `max-age=${PATH_CACHE_SEC}` } })).catch(() => {});
+}
+
 /** 拉取分片的 [from, to] 字节 (闭区间)。返回可读流 */
-export async function fetchChunkRange(bot: BotRow, fileId: string, from: number, to: number, fullSize: number): Promise<ReadableStream<Uint8Array>> {
-  const path = await filePath(bot, fileId);
+export async function fetchChunkRange(bot: BotRow, fileId: string, from: number, to: number, fullSize: number, onFresh?: (path: string) => void): Promise<ReadableStream<Uint8Array>> {
+  const path = await filePath(bot, fileId, onFresh);
   const whole = from === 0 && to === fullSize - 1;
   const res = await fetch(`${API}/file/bot${bot.token}/${path}`, whole ? {} : { headers: { Range: `bytes=${from}-${to}` } });
   if (res.status === 401 || res.status === 403) throw new TgFatal(`file fetch ${res.status}`);

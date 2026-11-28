@@ -16,6 +16,8 @@ export interface Env {
   PUBLIC_URL?: string;
   /** 1 (默认) = 维护时清扫频道里没被任何文件引用的消息 (放弃的上传)。多个部署共用一个频道时必须设为 0 */
   ORPHAN_SWEEP?: string;
+  /** 1 (默认) = 每个响应的第一片 file_path 在 Cache API 里跨 isolate 共享 (只在自定义域名上有效)。0 = 关闭 */
+  PATH_CACHE?: string;
   /** 本地实测: 响应头 X-D1-Rows */
   D1_METER?: string;
 }

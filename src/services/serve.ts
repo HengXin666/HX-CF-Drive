@@ -6,7 +6,7 @@
  */
 import type { Env } from '../env';
 import { num } from '../env';
-import { allBots, type BotRow, cachedPath, fetchChunkRange, markDead, rebindFileId, TgFatal, usableBots } from '../drivers/tg';
+import { allBots, type BotRow, cachedPath, fetchChunkRange, markDead, primePath, rebindFileId, storePath, TgFatal, usableBots } from '../drivers/tg';
 import { mapToChunks, parseRange, type ByteRange } from '../lib/range';
 import type { NodeRow } from '../lib/tree';
 import { HttpError, now } from '../lib/util';
@@ -163,6 +163,13 @@ export async function serveNode(env: Env, node: NodeRow, req: Request, opt: Serv
   // 分段清单: 一次响应最多拼 budget 片, 只读这些片所在的段
   const firstIdx = Math.floor(want.start / blob.chunkSize);
   await ensureParts(env, blob, firstIdx, Math.min(firstIdx + budget, Math.floor(want.end / blob.chunkSize)));
+  // 第一片在本 isolate 是冷的: 先查 Cache API 里别的 isolate 留下的 file_path (1 个子请求); 没有就在 getFile 后写回 (再 1 个)
+  let putFirst = false;
+  const first = blob.refs[firstIdx];
+  if (env.PATH_CACHE !== '0' && req.method === 'GET' && first && !cachedPath(first.b, first.f) && bots?.some((b) => b.id === first.b && b.status !== 'dead')) {
+    budget--;
+    if (!(await primePath(new URL(req.url).origin, first.b, first.f))) { budget--; putFirst = true; }
+  }
   const r = fitBudget(want, blob.chunkSize, budget, (i) => !!cachedPath(blob.refs[i].b, blob.refs[i].f));
   // 没带 Range 但一次拼不完: 按 206 返回前面一段, 播放器和下载器会接着用 Range 拉
   const status = range || r.end !== want.end ? 206 : 200;
@@ -170,7 +177,12 @@ export async function serveNode(env: Env, node: NodeRow, req: Request, opt: Serv
   if (status === 206) headers['Content-Range'] = `bytes ${r.start}-${r.end}/${blob.size}`;
   if (req.method === 'HEAD') return new Response(null, { status, headers });
 
-  const body = await tgStream(env, blob, r, bots ?? (await allBots(env)), opt.waitUntil);
+  const origin = new URL(req.url).origin;
+  const onFirstPath = putFirst ? (path: string) => {
+    const p = storePath(origin, first.b, first.f, path);
+    opt.waitUntil ? opt.waitUntil(p) : p.catch(() => {});
+  } : undefined;
+  const body = await tgStream(env, blob, r, bots ?? (await allBots(env)), opt.waitUntil, onFirstPath);
   if (useCache && status === 200) {
     const [a, b] = body.tee();
     const put = caches.default.put(cacheKey, new Response(b, { headers: { ...headers, 'Cache-Control': 'public, max-age=86400' } }));
@@ -180,7 +192,9 @@ export async function serveNode(env: Env, node: NodeRow, req: Request, opt: Serv
   return new Response(body, { status, headers });
 }
 
-async function tgStream(env: Env, blob: BlobInfo, r: ByteRange, bots: BotRow[], waitUntil?: (p: Promise<unknown>) => void): Promise<ReadableStream<Uint8Array>> {
+async function tgStream(
+  env: Env, blob: BlobInfo, r: ByteRange, bots: BotRow[], waitUntil?: (p: Promise<unknown>) => void, onFirstPath?: (path: string) => void,
+): Promise<ReadableStream<Uint8Array>> {
   const slices = mapToChunks(r, blob.chunkSize);
   const FLS = (globalThis as { FixedLengthStream?: new (n: number) => TransformStream<Uint8Array, Uint8Array> }).FixedLengthStream;
   const { readable, writable } = FLS ? new FLS(r.end - r.start + 1) : new TransformStream<Uint8Array, Uint8Array>();
@@ -188,7 +202,7 @@ async function tgStream(env: Env, blob: BlobInfo, r: ByteRange, bots: BotRow[], 
   // 同时最多 2 个 TG 连接 (Workers 允许 6 个), 子请求总数不变
   const open = (i: number) => {
     const sl = slices[i];
-    const p = openChunk(env, bots, blob, sl.idx, sl.from, sl.to);
+    const p = openChunk(env, bots, blob, sl.idx, sl.from, sl.to, i === 0 ? onFirstPath : undefined);
     p.catch(() => {}); // 失败在轮到它时再抛, 避免未处理的拒绝
     return p;
   };
@@ -212,13 +226,13 @@ async function tgStream(env: Env, blob: BlobInfo, r: ByteRange, bots: BotRow[], 
 }
 
 /** 打开一个分片; 上传它的 Bot 失效时换 Bot 重新绑定 file_id 并更新清单 */
-async function openChunk(env: Env, bots: BotRow[], blob: BlobInfo, idx: number, from: number, to: number) {
+async function openChunk(env: Env, bots: BotRow[], blob: BlobInfo, idx: number, from: number, to: number, onFresh?: (path: string) => void) {
   const ch = blob.refs[idx];
   if (!ch) { console.error('chunk missing in manifest', idx); throw new HttpError(500, 'internal error'); }
   const owner = bots.find((b) => b.id === ch.b);
   if (owner && owner.status !== 'dead') {
     try {
-      return await fetchChunkRange(owner, ch.f, from, to, ch.s);
+      return await fetchChunkRange(owner, ch.f, from, to, ch.s, onFresh);
     } catch (e) {
       if (!(e instanceof TgFatal) && !/401|403|Unauthorized|Forbidden/i.test(String(e))) throw e;
       await markDead(env, owner.id, String(e));

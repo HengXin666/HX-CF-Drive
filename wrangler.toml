@@ -33,6 +33,9 @@ SEARCH_PER_MIN = "6"
 TRASH_DAYS = "7"
 # 1 = 永久直链的小文件 (≤25MB) 写入边缘缓存。只在自定义域名上生效, workers.dev 上无效
 EDGE_CACHE = "0"
+# 1 = 每个响应第一片的 TG file_path 存进 Cache API, 冷 isolate 不必再 getFile (首字节更快, 少吃 Bot 限流)。
+# Cache API 只在自定义域名上有效, 且每次 match/put 都算子请求, 所以只用于第一片; workers.dev 上建议设为 0
+PATH_CACHE = "1"
 # 1 = 维护时清扫没被任何文件引用的频道消息 (放弃的上传)。多个部署共用一个频道时必须设为 0
 ORPHAN_SWEEP = "1"
 # 对外地址, 生成直链/分享链接时使用 (经 Service Binding 调用时也能拿到公网可用的链接)。不设则用请求的 origin
