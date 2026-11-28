@@ -59,33 +59,60 @@ function memGet(k: string): string | null {
 }
 
 // ---------- 磁盘层 (Cache Storage, 只在安全上下文可用) ----------
-type Idx = [string, number][]; // [key, size], 头部最旧
+// 索引 (key -> 字节数, Map 头部最旧) 只在内存里维护 (#23): 第一次用到时从 localStorage 读一次,
+// 之后命中/写入只改内存, 1 秒防抖写回, 页面隐藏/关闭时立即写回。原来每次磁盘命中都要同步 parse + stringify 整个索引。
 const hasDisk = () => typeof caches !== 'undefined' && isSecureContext;
-const readIdx = (): Idx => { try { return JSON.parse(localStorage.getItem(INDEX) ?? '[]'); } catch { return []; } };
-const writeIdx = (i: Idx) => localStorage.setItem(INDEX, JSON.stringify(i));
 const diskUrl = (k: string) => `/__img/${encodeURIComponent(k)}`;
+let idx: Map<string, number> | null = null;
+let idxBytes = 0;
+let flushTimer: ReturnType<typeof setTimeout> | undefined;
+function index(): Map<string, number> {
+  if (idx) return idx;
+  idx = new Map();
+  try { for (const [k, n] of JSON.parse(localStorage.getItem(INDEX) ?? '[]') as [string, number][]) idx.set(k, n); } catch { /* 坏了就当空的 */ }
+  idxBytes = 0;
+  for (const n of idx.values()) idxBytes += n;
+  if (typeof window !== 'undefined') {
+    window.addEventListener('pagehide', flushIdx);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushIdx(); });
+  }
+  return idx;
+}
+function flushIdx() {
+  clearTimeout(flushTimer);
+  flushTimer = undefined;
+  if (idx) try { localStorage.setItem(INDEX, JSON.stringify([...idx])); } catch { /* 配额满了: 下次重建 */ }
+}
+const scheduleFlush = () => { if (flushTimer === undefined) flushTimer = setTimeout(flushIdx, 1000); };
+/** 记一笔并移到最新 */
+function touch(k: string, n: number) {
+  const m = index();
+  const old = m.get(k);
+  if (old !== undefined) { m.delete(k); idxBytes -= old; }
+  m.set(k, n);
+  idxBytes += n;
+  scheduleFlush();
+}
 
 async function diskGet(k: string): Promise<Blob | null> {
   if (!hasDisk()) return null;
   const r = await (await caches.open(STORE)).match(diskUrl(k)).catch(() => undefined);
   if (!r) return null;
-  const idx = readIdx().filter(([x]) => x !== k);
-  writeIdx([...idx, [k, Number(r.headers.get('Content-Length')) || 0]]);
+  touch(k, Number(r.headers.get('Content-Length')) || 0);
   return r.blob();
 }
 async function diskPut(k: string, b: Blob) {
   if (!hasDisk() || b.size > DISK_CAP) return;
   const c = await caches.open(STORE);
   await c.put(diskUrl(k), new Response(b, { headers: { 'Content-Type': b.type, 'Content-Length': String(b.size) } }));
-  let idx = readIdx().filter(([x]) => x !== k);
-  idx.push([k, b.size]);
-  let total = idx.reduce((s, [, n]) => s + n, 0);
-  while (total > DISK_CAP && idx.length > 1) {
-    const [old, n] = idx.shift()!;
-    total -= n;
+  touch(k, b.size);
+  const m = index();
+  while (idxBytes > DISK_CAP && m.size > 1) {
+    const [old, n] = m.entries().next().value as [string, number];
+    m.delete(old);
+    idxBytes -= n;
     await c.delete(diskUrl(old));
   }
-  writeIdx(idx);
 }
 
 // ---------- 取图: 去重 + 并发上限 ----------
@@ -128,6 +155,10 @@ export async function clearImages() {
   for (const v of mem.values()) URL.revokeObjectURL(v.url);
   mem.clear();
   memBytes = 0;
+  clearTimeout(flushTimer);
+  flushTimer = undefined;
+  idx = new Map();
+  idxBytes = 0;
   localStorage.removeItem(INDEX);
   if (hasDisk()) await caches.delete(STORE).catch(() => {});
 }

@@ -1,4 +1,4 @@
-// 浏览器端 sha256 (用于秒传)。≤256MB 用 crypto.subtle 一次算完; 更大的文件分块增量计算, 内存占用恒定
+// 浏览器端 sha256 (用于秒传)。≤256MB 用 crypto.subtle 一次算完; 更大的文件分块增量计算, 内存占用恒定; 默认在 Web Worker 里算
 const K = new Uint32Array([
   0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
   0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
@@ -63,7 +63,8 @@ export class Sha256 {
   }
 }
 
-export async function sha256File(file: Blob, onProgress?: (p: number) => void): Promise<string> {
+/** 在当前线程算 (Worker 里调用它; 不支持 Worker 时主线程兜底) */
+export async function hashBlob(file: Blob, onProgress?: (p: number) => void): Promise<string> {
   if (file.size <= 256 * 1024 * 1024) {
     const d = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
     onProgress?.(1);
@@ -76,4 +77,50 @@ export async function sha256File(file: Blob, onProgress?: (p: number) => void): 
     onProgress?.(Math.min(o + step, file.size) / file.size);
   }
   return h.hex();
+}
+
+// 哈希放进 Web Worker (#23): 大文件的纯 JS 分块计算和 ≤256MB 的 arrayBuffer 拷贝都不再占主线程, 上传时页面不卡。
+// 一个 Worker 复用, 按 id 区分并发的请求; Blob 传过去是引用, 不拷贝内容。
+type Msg = { id: number; progress?: number; hex?: string; error?: string };
+let worker: Worker | null | undefined;
+let seq = 0;
+const pending = new Map<number, { res: (h: string) => void; rej: (e: Error) => void; onProgress?: (p: number) => void }>();
+function getWorker(): Worker | null {
+  if (worker !== undefined) return worker;
+  try {
+    worker = new Worker(new URL('./sha256.worker.ts', import.meta.url), { type: 'module' });
+    worker.onmessage = (e: MessageEvent<Msg>) => {
+      const p = pending.get(e.data.id);
+      if (!p) return;
+      if (e.data.progress !== undefined) p.onProgress?.(e.data.progress);
+      else {
+        pending.delete(e.data.id);
+        if (e.data.hex) p.res(e.data.hex); else p.rej(new Error(e.data.error ?? 'sha256 失败'));
+      }
+    };
+    worker.onerror = (e) => {
+      // Worker 起不来 (CSP, 老浏览器): 之后都在主线程算, 已排队的也改到主线程
+      e.preventDefault();
+      worker?.terminate();
+      worker = null;
+      for (const [id, p] of pending) { pending.delete(id); p.rej(new Error('worker')); }
+    };
+  } catch { worker = null; }
+  return worker;
+}
+
+export async function sha256File(file: Blob, onProgress?: (p: number) => void): Promise<string> {
+  const w = getWorker();
+  if (w) {
+    try {
+      return await new Promise<string>((res, rej) => {
+        const id = ++seq;
+        pending.set(id, { res, rej, onProgress });
+        w.postMessage({ id, file });
+      });
+    } catch (e) {
+      if ((e as Error).message !== 'worker') throw e;
+    }
+  }
+  return hashBlob(file, onProgress);
 }

@@ -1,5 +1,5 @@
 // 文件浏览: 路径眉标, 上传 (拖放/选择), 新建目录, 搜索, 预览, 下载, 直链, 分享, 重命名, 移动 (目录树), 删除, 多选批量操作
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ContextMenu, useContextMenu } from '../components/ContextMenu';
 import { Icon, IconButton } from '../components/Icon';
 import { ImageCell } from '../components/ImageCell';
@@ -226,7 +226,12 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
     toast.success(items.length > 1 ? `已移动 ${items.length} 项到 ${to}` : `已移动到 ${to}`);
   };
 
-  const columns: Column<Node>[] = [
+  // 列定义 memo 化 (#23): 只在图片开关或搜索状态变化时重建, 表格 (TanStack 列定义) 不再每次 render 都重算;
+  // 列里用到的操作每次 render 更新到 ref, 点下去总是最新的闭包
+  const act$ = useRef({ save, share, remove, full, changed });
+  act$.current = { save, share, remove, full, changed };
+  const isSearch = !!searching;
+  const columns = useMemo<Column<Node>[]>(() => [
     { key: 'name', header: '名称', sort: (n) => (n.kind === 'dir' ? '0' : '1') + n.name.toLowerCase(), render: (n) => {
       const fi = fileIcon(n.kind, n.mime, n.name);
       return (
@@ -239,7 +244,7 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
               {n.kind === 'dir' ? '' : `${fmtSize(n.size)} · `}{fmtTime(n.updatedAt)}
             </span>
           </span>
-          {searching && n.path && <span className="truncate font-mono text-xs text-muted-foreground">{parentOf(n.path)}</span>}
+          {isSearch && n.path && <span className="truncate font-mono text-xs text-muted-foreground">{parentOf(n.path)}</span>}
         </span>
       );
     } },
@@ -250,16 +255,16 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
     { key: 'op', header: '', align: 'right', render: (n) => (
       <div className="flex justify-end gap-0.5" onClick={(e) => e.stopPropagation()}>
         <span className="hidden gap-0.5 sm:flex">
-          {n.kind === 'file' && <IconButton name="download" label="下载" onClick={() => void save(n).catch((e) => toast.error((e as Error).message))} />}
-          <IconButton name="share" label="分享" onClick={() => share(n)} />
+          {n.kind === 'file' && <IconButton name="download" label="下载" onClick={() => void act$.current.save(n).catch((e) => toast.error((e as Error).message))} />}
+          <IconButton name="share" label="分享" onClick={() => act$.current.share(n)} />
         </span>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button size="icon-sm" variant="ghost" aria-label="更多" className="text-muted-foreground"><Icon name="more" /></Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="min-w-40">
-            {n.kind === 'file' && <DropdownMenuItem className="sm:hidden" onSelect={() => void save(n).catch((e) => toast.error((e as Error).message))}><Icon name="download" /> 下载</DropdownMenuItem>}
-            <DropdownMenuItem className="sm:hidden" onSelect={() => share(n)}><Icon name="share" /> 分享</DropdownMenuItem>
+            {n.kind === 'file' && <DropdownMenuItem className="sm:hidden" onSelect={() => void act$.current.save(n).catch((e) => toast.error((e as Error).message))}><Icon name="download" /> 下载</DropdownMenuItem>}
+            <DropdownMenuItem className="sm:hidden" onSelect={() => act$.current.share(n)}><Icon name="share" /> 分享</DropdownMenuItem>
             {n.kind === 'file' && (
               <DropdownMenuItem onSelect={() => void fs.link(n.id, 0).then((r) => copy(r.url, '永久直链'), (e) => toast.error((e as Error).message))}>
                 <Icon name="link" /> 复制永久直链
@@ -267,16 +272,16 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
             )}
             <DropdownMenuItem onSelect={() => setPrompt({
               title: '重命名', fields: [{ key: 'name', label: '新名称', value: n.name }],
-              onOk: async (v) => { await fs.move(n.id, undefined, v.name.trim()); changed(); },
+              onOk: async (v) => { await fs.move(n.id, undefined, v.name.trim()); act$.current.changed(); },
             })}><Icon name="rename" /> 重命名</DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => setMoving([full(n)])}><Icon name="move" /> 移动到…</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setMoving([act$.current.full(n)])}><Icon name="move" /> 移动到…</DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem variant="destructive" onSelect={() => void remove([full(n)])}><Icon name="trash" /> 删除</DropdownMenuItem>
+            <DropdownMenuItem variant="destructive" onSelect={() => void act$.current.remove([act$.current.full(n)])}><Icon name="trash" /> 删除</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
     ) },
-  ];
+  ], [img, isSearch]);
 
   const here = path.split('/').filter(Boolean).pop();
   const list = searching ?? rows;
