@@ -35,9 +35,10 @@ export function Admin({ onStats }: { onStats: (s: Stats) => void }) {
   const [prompt, setPrompt] = useState<PromptRequest | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(async () => {
+  // fresh: 后台操作之后强制重拉; 首次打开复用侧栏刚拉过的用量 (见 admin.stats)
+  const load = useCallback(async (fresh = false) => {
     try {
-      const [s, t] = await Promise.all([admin.stats(), admin.tokens()]);
+      const [s, t] = await Promise.all([admin.stats(fresh), admin.tokens()]);
       setStats(s);
       setTokens(t.items);
       onStats(s);
@@ -51,7 +52,7 @@ export function Admin({ onStats }: { onStats: (s: Stats) => void }) {
     try {
       await fn();
       toast.success(ok);
-      await load();
+      await load(true);
     } catch (e) {
       toast.error((e as Error).message);
     }
@@ -107,8 +108,8 @@ export function Admin({ onStats }: { onStats: (s: Stats) => void }) {
         <Stat icon="database" label="去重后占用" value={fmtSize(stats?.blobs.bytes ?? 0)} hint={`${stats?.blobs.n ?? 0} 个数据块${stats?.snapshotAt ? ` · 统计于 ${fmtTime(stats.snapshotAt)}` : ''}`} />
         <Stat icon="plane" label="可用 Bot" value={stats?.bots.filter((b) => b.status === 'active').length ?? 0} />
       </div>
-      {/* Bot 或频道变了就重新拉拓扑 */}
-      <Topology key={[...(stats?.bots ?? []), ...(stats?.channels ?? [])].map((x) => `${x.id}:${x.status}`).join(',')} />
+      {/* Bot 或频道变了就重新拉拓扑; 用量到了再挂, 免得 key 从空变成实际值时拉两次 */}
+      {stats && <Topology key={[...(stats?.bots ?? []), ...(stats?.channels ?? [])].map((x) => `${x.id}:${x.status}`).join(',')} />}
       <DataTable
         title="Telegram 频道"
         description="文件分片存在这些频道里; 只读的频道不再写入新分片。"
@@ -119,7 +120,7 @@ export function Admin({ onStats }: { onStats: (s: Stats) => void }) {
         actions={
           <Button size="sm" variant="outline" onClick={() => setPrompt({
             title: '添加频道', fields: [{ key: 'id', label: '频道 ID', placeholder: '-100xxxxxxxxxx' }],
-            onOk: async (v) => { const r = await admin.addChannel(v.id.trim()); report(r.bots); await load(); },
+            onOk: async (v) => { const r = await admin.addChannel(v.id.trim()); report(r.bots); await load(true); },
           })}><Icon name="add" /><span className="hidden sm:inline">添加</span></Button>
         }
       />
@@ -132,7 +133,7 @@ export function Admin({ onStats }: { onStats: (s: Stats) => void }) {
         actions={
           <Button size="sm" variant="outline" onClick={() => setPrompt({
             title: '添加 Bot', fields: [{ key: 'token', label: 'Bot Token', type: 'password' }],
-            onOk: async (v) => { const r = await admin.addBot(v.token.trim()); report(r.channels); await load(); },
+            onOk: async (v) => { const r = await admin.addBot(v.token.trim()); report(r.channels); await load(true); },
           })}><Icon name="add" /><span className="hidden sm:inline">添加</span></Button>
         }
       />
@@ -155,7 +156,7 @@ export function Admin({ onStats }: { onStats: (s: Stats) => void }) {
               const r = await admin.addToken(v.name.trim(), v.scopes.split(',').map((s) => s.trim()).filter(Boolean), v.root.trim() || '/');
               await navigator.clipboard.writeText(r.token);
               toast.success('令牌已复制到剪贴板, 只显示这一次', { duration: 8000 });
-              await load();
+              await load(true);
             },
           })}><Icon name="add" /><span className="hidden sm:inline">新建</span></Button>
         }

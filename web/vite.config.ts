@@ -28,7 +28,17 @@ export default defineConfig({
       },
     },
   ],
-  build: { outDir: OUT, emptyOutDir: true, chunkSizeWarningLimit: 1500 },
+  build: {
+    outDir: OUT,
+    emptyOutDir: true,
+    chunkSizeWarningLimit: 1500,
+    rollupOptions: {
+      output: {
+        // React 单独成块: 应用代码更新时它的文件名 (hash) 不变, 浏览器继续用缓存 (/assets/* 是 immutable, 见 public/_headers)
+        manualChunks: (id) => (/node_modules\/(react|react-dom|scheduler)\//.test(id) ? 'react' : undefined),
+      },
+    },
+  },
   server: {
     proxy: Object.fromEntries(['/api', '/f', '/s', '/dav'].map((p) => [p, { target: API, changeOrigin: true }])),
   },

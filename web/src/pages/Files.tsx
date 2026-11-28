@@ -1,10 +1,9 @@
 // 文件浏览: 路径眉标, 上传 (拖放/选择), 新建目录, 搜索, 预览, 下载, 直链, 分享, 重命名, 移动 (目录树), 删除, 多选批量操作
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { ContextMenu, useContextMenu } from '../components/ContextMenu';
 import { Icon, IconButton } from '../components/Icon';
 import { ImageCell } from '../components/ImageCell';
-import { MoveDialog } from '../components/MoveDialog';
-import { Preview, type PreviewTarget } from '../components/Preview';
+import type { PreviewTarget } from '../components/Preview';
 import { PromptDialog, type PromptRequest } from '../components/PromptDialog';
 import { Meta, Page } from '../components/Shell';
 import { type Column, DataTable } from '../components/Table';
@@ -16,6 +15,10 @@ import { download } from '../lib/transfer';
 import {
   Button, cn, confirmDialog, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger, Input, toast,
 } from '../ui';
+
+// 弹窗按需加载 (#23): 第一次用到时才下载, 之后一直挂着 (保留关闭动画)
+const MoveDialog = lazy(() => import('../components/MoveDialog').then((m) => ({ default: m.MoveDialog })));
+const Preview = lazy(() => import('../components/Preview').then((m) => ({ default: m.Preview })));
 
 const parentOf = (p: string) => p.replace(/\/[^/]+\/?$/, '') || '/';
 /** 和服务端 listChildren 一样的顺序: 目录在前, 名字按 locale 不分大小写 */
@@ -73,6 +76,10 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
   const [prompt, setPrompt] = useState<PromptRequest | null>(null);
   const [moving, setMoving] = useState<Item[] | null>(null);
   const [preview, setPreview] = useState<PreviewTarget | null>(null);
+  // 弹窗用过一次才挂载 (懒加载的代码到那时才下载)
+  const used = useRef({ move: false, preview: false }).current;
+  if (moving) used.move = true;
+  if (preview) used.preview = true;
   const [drag, setDrag] = useState(false);
   const [img, setImg] = usePrefs();
   const rowMenu = useContextMenu<Node>();
@@ -383,13 +390,17 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
         )}
       </ContextMenu>
       <PromptDialog req={prompt} onClose={() => setPrompt(null)} />
-      <MoveDialog
-        nodes={moving}
-        from={moving?.length ? parentOf(moving[0].fullPath) : path}
-        onClose={() => setMoving(null)}
-        onMove={(to) => moveTo(moving ?? [], to)}
-      />
-      <Preview target={preview} onClose={() => setPreview(null)} onDownload={(n) => void save(n)} />
+      <Suspense fallback={null}>
+        {used.move && (
+          <MoveDialog
+            nodes={moving}
+            from={moving?.length ? parentOf(moving[0].fullPath) : path}
+            onClose={() => setMoving(null)}
+            onMove={(to) => moveTo(moving ?? [], to)}
+          />
+        )}
+        {used.preview && <Preview target={preview} onClose={() => setPreview(null)} onDownload={(n) => void save(n)} />}
+      </Suspense>
       <UploadQueue />
     </Page>
   );

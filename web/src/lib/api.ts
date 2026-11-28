@@ -95,8 +95,18 @@ export interface Me { scopes: string[]; rootId: string }
 /** 当前令牌的权限: 不是管理员就不请求管理接口 */
 export const me = () => api<Me>('GET', '/me');
 
+// 侧栏和后台页都要用量: 30 秒内共用同一个请求 (含进行中的), 后台操作后传 fresh 强制重拉
+let statsReq: { at: number; p: Promise<Stats> } | null = null;
+const STATS_TTL = 30_000;
+
 export const admin = {
-  stats: () => api<Stats>('GET', '/admin/stats'),
+  stats: (fresh = false) => {
+    if (!fresh && statsReq && Date.now() - statsReq.at < STATS_TTL) return statsReq.p;
+    const p = api<Stats>('GET', '/admin/stats');
+    const cur = (statsReq = { at: Date.now(), p });
+    p.catch(() => { if (statsReq === cur) statsReq = null; });
+    return p;
+  },
   addBot: (token: string) => api<{ username: string; channels: Record<string, string> }>('POST', '/admin/bots', { token }),
   removeBot: (id: string) => api('DELETE', `/admin/bots/${id}`),
   addChannel: (id: string) => api<{ title: string; bots: Record<string, string> }>('POST', '/admin/channels', { id }),

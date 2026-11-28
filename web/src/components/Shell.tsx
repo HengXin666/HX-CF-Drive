@@ -25,10 +25,10 @@ export function ThemeToggle() {
 }
 
 // 手机上侧栏是抽屉, 点了条目要收起来
-function NavButton({ item, active, onNav }: { item: NavItem; active: boolean; onNav: (id: string) => void }) {
+function NavButton({ item, active, onNav, onHover }: { item: NavItem; active: boolean; onNav: (id: string) => void; onHover?: (id: string) => void }) {
   const { isMobile, setOpenMobile } = useSidebar();
   return (
-    <SidebarMenuButton isActive={active} onClick={() => { onNav(item.id); if (isMobile) setOpenMobile(false); }}>
+    <SidebarMenuButton isActive={active} onPointerEnter={() => onHover?.(item.id)} onClick={() => { onNav(item.id); if (isMobile) setOpenMobile(false); }}>
       <Icon name={item.icon} />
       <span>{item.label}</span>
       <span className="ml-auto font-mono text-[10.5px] text-muted-foreground">{item.hint}</span>
@@ -40,6 +40,8 @@ export function Shell(props: {
   items: NavItem[];
   active: string;
   onNav: (id: string) => void;
+  /** 鼠标移到菜单项上 (预取懒加载的页面) */
+  onHover?: (id: string) => void;
   onLogout: () => void;
   usage?: ReactNode;
   children: ReactNode;
@@ -65,7 +67,7 @@ export function Shell(props: {
                   <SidebarMenu>
                     {props.items.filter((i) => i.group === g).map((it) => (
                       <SidebarMenuItem key={it.id}>
-                        <NavButton item={it} active={it.id === props.active} onNav={props.onNav} />
+                        <NavButton item={it} active={it.id === props.active} onNav={props.onNav} onHover={props.onHover} />
                       </SidebarMenuItem>
                     ))}
                   </SidebarMenu>

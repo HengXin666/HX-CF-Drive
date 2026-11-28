@@ -1,15 +1,26 @@
 // 应用入口: 登录门 + hash 路由 (#/files/a/b, #/trash, #/shares, #/admin, #/docs)
 import { File, HardDrive, Send } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
+import { Icon } from './components/Icon';
 import { Shell, type NavItem } from './components/Shell';
 import { admin, ApiError, auth, fmtSize, me, type Stats } from './lib/api';
 import { clearImages } from './lib/imgcache';
-import { Admin } from './pages/Admin';
-import { ApiDocs } from './pages/ApiDocs';
 import { Files } from './pages/Files';
 import { Login } from './pages/Login';
-import { Shares } from './pages/Shares';
-import { Trash } from './pages/Trash';
+
+// 路由级代码分割 (#23): 只用文件页的人不用下载后台, 接口文档, 分享和回收站
+const Admin = lazy(() => import('./pages/Admin').then((m) => ({ default: m.Admin })));
+const ApiDocs = lazy(() => import('./pages/ApiDocs').then((m) => ({ default: m.ApiDocs })));
+const Shares = lazy(() => import('./pages/Shares').then((m) => ({ default: m.Shares })));
+const Trash = lazy(() => import('./pages/Trash').then((m) => ({ default: m.Trash })));
+/** 鼠标移到侧栏菜单上时预取对应页面, 点下去基本不用等 */
+const PREFETCH: Record<string, () => Promise<unknown>> = {
+  admin: () => import('./pages/Admin'), docs: () => import('./pages/ApiDocs'), shares: () => import('./pages/Shares'), trash: () => import('./pages/Trash'),
+};
+
+const Loading = () => (
+  <div className="flex items-center gap-2 p-6 text-sm text-muted-foreground"><Icon name="spinner" className="size-4 animate-spin" />加载中…</div>
+);
 import { Toaster } from './ui';
 
 function useHash(): [string, (h: string) => void] {
@@ -66,6 +77,7 @@ export function App() {
       items={items}
       active={page}
       onNav={(id) => nav(id === 'files' ? '/files/' : `/${id}`)}
+      onHover={(id) => void PREFETCH[id]?.()}
       onLogout={() => { auth.clear(); void clearImages(); setAuthed(false); }}
       usage={stats && (
         <div className="flex items-center gap-3">
@@ -81,8 +93,11 @@ export function App() {
         </div>
       )}
     >
-      {page === 'trash' ? <Trash /> : page === 'shares' ? <Shares /> : page === 'docs' ? <ApiDocs />
-        : page === 'admin' && isAdmin ? <Admin onStats={setStats} /> : <Files path={filePath} go={go} isAdmin={isAdmin} />}
+      <Suspense fallback={<Loading />}>
+        {page === 'trash' ? <Trash /> : page === 'shares' ? <Shares /> : page === 'docs' ? <ApiDocs />
+          : page === 'admin' && scopes === null ? <Loading /> // 权限还没回来: 先等, 免得先挂文件页白拉一次目录
+          : page === 'admin' && isAdmin ? <Admin onStats={setStats} /> : <Files path={filePath} go={go} isAdmin={isAdmin} />}
+      </Suspense>
     </Shell>
   );
 }
