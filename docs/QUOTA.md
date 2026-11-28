@@ -128,6 +128,8 @@ D1 读行几乎全部来自搜索的最坏情况。不搜索或搜索大多命�
 | `POST /fs/batch` delete 3 项 | 3 | 46 | 6 | 0 | 原来前端逐项 `/fs/delete`, 每项 2 条查询 |
 | `POST /fs/batch` restore 3 项 | 4 | 48 | 6 | 0 | 原位置同名时加 `(restored 时间)` 后缀, 和单个恢复一致 |
 | `PATCH /shares/:id` (编辑分享) | 3 | 4 | 1 | 0 | 读分享 1 行 + 权限检查 + 写 1 行; 访问分享仍按主键读 1 行, 停用只是多判断一列 |
+| `POST /mcp` tools/call list | 2 | 12 | 0 | 0 | 工具在进程内转给 REST 路由, 成本和直接调对应接口相同 (令牌解析走 60 秒缓存) |
+| `POST /mcp` tools/call upload (小文件) | 8 | 5 | 11 | 1 | 同 `POST /upload`; 内容在 JSON 里, base64 解码花 CPU, 所以限 10 MB |
 | `POST /fs/links` (批量直链) | 2 | ≈ 文件数 + 祖先目录数 | 0 | 0 | 一条 `IN` + 一条 `pathsOf`; 替代每个文件一次 `/fs/link` |
 
 ## 8. 本地验证情况

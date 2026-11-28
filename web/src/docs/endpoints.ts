@@ -56,6 +56,13 @@ export const GROUPS: Group[] = [
     ],
   },
   {
+    id: 'mcp', title: 'MCP (AI Agent)',
+    note: 'Model Context Protocol 端点, Streamable HTTP 的无状态子集 (直接返回 JSON, 不开 SSE)。鉴权同 REST; 工具: list, stat, search, upload (≤ 10 MB), link, share, 进程内转给对应接口, scope 和额度不变。客户端配置见 docs/INTEGRATION.md 2.1 节。',
+    items: [
+      { method: 'POST', path: '/api/v1/mcp', scope: 'read', desc: 'JSON-RPC 2.0: initialize, tools/list, tools/call, ping; 通知回 202。工具需要的 scope 按对应接口 (upload 要 write)', body: '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"upload","arguments":{"dir":"/agent","name":"a.md","text":"# hi"}}}', resp: '{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"..."}],"structuredContent":{...}}}' },
+    ],
+  },
+  {
     id: 'public', title: '公开访问',
     note: '不需要令牌。/f 已开 CORS, 可直接嵌入 img 或 video。',
     items: [

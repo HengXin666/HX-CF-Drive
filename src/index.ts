@@ -4,6 +4,7 @@ import type { AppEnv, Env } from './env';
 import { HttpError } from './lib/util';
 import { api } from './routes/api';
 import { dav } from './routes/dav';
+import { mcp } from './routes/mcp';
 import { pub } from './routes/public';
 import { runMaintenance } from './services/maintenance';
 import { setTgApiBase } from './drivers/tg';
@@ -27,7 +28,7 @@ app.use(
   '/api/*',
   cors({
     origin: '*',
-    allowHeaders: ['Authorization', 'Content-Type', 'Range', 'If-Range', 'X-Share-Password', 'X-Drive-Scope'],
+    allowHeaders: ['Authorization', 'Content-Type', 'Range', 'If-Range', 'X-Share-Password', 'X-Drive-Scope', 'Mcp-Protocol-Version', 'Mcp-Session-Id'],
     allowMethods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     exposeHeaders: ['Content-Range', 'Content-Length', 'ETag', 'Retry-After', 'X-Request-Id'],
     maxAge: 86400,
@@ -36,6 +37,7 @@ app.use(
 app.use('/f/*', cors({ origin: '*', exposeHeaders: ['Content-Range', 'Content-Length', 'ETag'] }));
 
 app.get('/api/health', (c) => c.json({ ok: true, name: 'HX-CF-Drive', version: '0.4.0' }));
+app.route('/api/v1/mcp', mcp);
 app.route('/api/v1', api);
 app.route('/dav', dav);
 app.route('/', pub);

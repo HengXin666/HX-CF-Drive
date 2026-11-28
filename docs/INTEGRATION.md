@@ -120,6 +120,50 @@ curl -X PUT --data-binary @part0 "$CHUNK_URL?i=0&ticket=$TICKET"
 
 可选参数: `overwrite` 覆盖同名文件, `mkdirs: false` 禁止自动建目录。单个请求体不能超过 100 MB (CF 免费计划), 所以超过 19 MiB 的文件必须走分片接口。
 
+## 2.1 MCP (给 AI Agent 用)
+
+`POST /api/v1/mcp` 是 [Model Context Protocol](https://modelcontextprotocol.io) 端点 (Streamable HTTP 传输的无状态子集: 每个 POST 直接返回 JSON, 不开 SSE, 没有会话)。鉴权和 REST 完全一样: `Authorization: Bearer <令牌>`, 可带 `X-Drive-Scope`; 每个工具在 Worker 进程内转给对应的 REST 接口 (不发子请求), 所以 scope, 令牌根目录隔离, 搜索限频, 额度都和直接调接口相同。给 Agent 单独发一个 `rootPath` 令牌 (如 `/agent`, `read,write`) 最稳妥。
+
+| 工具 | 对应接口 | 需要 |
+| --- | --- | --- |
+| `list` `{path \| id, limit?, after?}` | `GET /fs/list` | read |
+| `stat` `{path \| id}` | `GET /fs/stat` | read |
+| `search` `{q, limit?}` | `GET /fs/search` (每分钟 6 次) | read |
+| `upload` `{dir?, name, text \| base64, mime?, overwrite?}` | `POST /upload` (≤ 10 MB, 更大的用分片上传) | write |
+| `link` `{path \| id, expiresIn?}` | `POST /fs/link` | read |
+| `share` `{path \| id, password?, expiresIn?, remark?}` | `POST /shares` | read |
+
+接口报错时工具结果带 `isError: true`, 文本里是 `HTTP 状态: 错误信息`; 成功时 `structuredContent` 就是 REST 的返回体。
+
+Claude Code:
+
+```bash
+claude mcp add --transport http hx-drive https://drive.example.com/api/v1/mcp --header "Authorization: Bearer hxd_xxx"
+```
+
+Claude Desktop / Cursor 等支持远程 HTTP 服务器的客户端 (`mcpServers` 配置):
+
+```json
+{
+  "mcpServers": {
+    "hx-drive": {
+      "type": "http",
+      "url": "https://drive.example.com/api/v1/mcp",
+      "headers": { "Authorization": "Bearer hxd_xxx" }
+    }
+  }
+}
+```
+
+只支持 stdio 的客户端可以用 [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) 转一下: `npx mcp-remote https://drive.example.com/api/v1/mcp --header "Authorization: Bearer hxd_xxx"`。
+
+用 curl 手动调用:
+
+```bash
+curl -s https://drive.example.com/api/v1/mcp -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"upload","arguments":{"dir":"/agent/tmp","name":"a.md","text":"# hi"}}}'
+```
+
 ## 3. WebDAV
 
 地址 `$BASE/dav/`, 用户名随意, 密码填令牌。

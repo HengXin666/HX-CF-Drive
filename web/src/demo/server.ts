@@ -1,4 +1,5 @@
 // 模拟 REST API v1: 路由与返回结构对齐 src/routes/api.ts, 数据落在浏览器本地
+import { handleMcp } from '../../../src/lib/mcpcore';
 import { type DShare, delData, getData, newId, now, putData, save, sha256Hex, state } from './db';
 import { BASE, fileLink, json, serveNode, servePublicFile, serveShare, shareLink } from './serve';
 import {
@@ -286,6 +287,26 @@ on('PATCH', '/shares/([^/]+)', 'write', async (c, m) => {
 on('DELETE', '/shares/([^/]+)', 'write', (_c, m) => {
   state().shares = state().shares.filter((s) => s.id !== m[1]);
   return json(200, { ok: true });
+});
+
+// ---------------- MCP (#22) ----------------
+
+// 和 Worker 共用同一份 JSON-RPC 分发与工具表; 每个工具在本地再走一遍上面的模拟路由
+on('POST', '/mcp', 'read', async ({ req }) => {
+  const msg = await req.json().catch(() => undefined);
+  if (msg === undefined) return json(400, { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'parse error' } });
+  const auth = req.headers.get('Authorization') ?? '';
+  const out = await handleMcp(msg, async (method, path, body, raw) => {
+    const headers: Record<string, string> = { Authorization: auth };
+    if (raw) headers['Content-Type'] = raw.mime;
+    else if (body !== undefined) headers['Content-Type'] = 'application/json';
+    const res = await handle(new Request(`${location.origin}${BASE}api/v1${path}`, {
+      method, headers, body: raw ? new Blob([raw.data as BlobPart]) : body !== undefined ? JSON.stringify(body) : undefined,
+    }));
+    const text = await res.text();
+    try { return { status: res.status, body: JSON.parse(text) }; } catch { return { status: res.status, body: text }; }
+  });
+  return out === null ? new Response(null, { status: 202 }) : json(200, out);
 });
 
 // ---------------- 管理 ----------------

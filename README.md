@@ -71,6 +71,7 @@ src/
   lib/                       鉴权, 目录树, Range, 签名, D1 计量, 工具函数
   routes/api.ts              REST API
   routes/dav.ts              WebDAV
+  routes/mcp.ts              MCP 端点 (工具定义在 lib/mcpcore.ts, 演示模式共用)
   routes/public.ts           签名直链与分享
   routes/sharePage.ts        分享链接的浏览器页面
   services/upload.ts         无状态分片上传 (签名凭证 + 回执)
@@ -168,6 +169,7 @@ node scripts/e2e.mjs             # 端到端冒烟
 | --- | --- |
 | REST API | `/api/v1`, 支持受限令牌 (按权限和目录隔离), 全部接口带 curl 示例 |
 | WebDAV | `/dav`, 可挂到 rclone, RaiDrive, Finder, Infuse, OpenList |
+| MCP | `/api/v1/mcp`, 远程 HTTP MCP 服务器, 工具 list / stat / search / upload / link / share, 鉴权同 REST ([配置示例](docs/INTEGRATION.md#21-mcp-给-ai-agent-用)) |
 | 直链与分享 | `/f/:id` 签名永久直链, `/s/:id` 分享链接 |
 | 图床工具 | PicGo, ShareX 走一次性上传接口 |
 | Agent Skill | [`skills/hx-cf-drive/SKILL.md`](skills/hx-cf-drive/SKILL.md), 部署后也发布在 `/skill.md` |

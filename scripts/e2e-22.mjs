@@ -104,5 +104,42 @@ if (sect('share')) {
   ok((await j('PATCH', `/api/v1/shares/${sh.id}`, { disabled: true }, { Authorization: `Bearer ${t}` })).status === 403, '受限令牌改不了根外的分享');
 }
 
+if (sect('mcp')) {
+  const D = `${P}/mcp`;
+  let id = 0;
+  const rpc = async (method, params, auth = H.Authorization, label) => {
+    const r = await fetch(`${BASE}/api/v1/mcp`, { method: 'POST', headers: { Authorization: auth, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' }, body: JSON.stringify({ jsonrpc: '2.0', id: ++id, method, params }) });
+    if (label && r.headers.get('X-D1-Rows')) meter.push([label, r.headers.get('X-D1-Rows')]);
+    return { status: r.status, body: await r.json().catch(() => null) };
+  };
+  const tool = async (name, args, auth, label) => (await rpc('tools/call', { name, arguments: args }, auth, label)).body.result;
+  let r = await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'e2e', version: '1' } });
+  ok(r.status === 200 && r.body.result.serverInfo.name === 'HX-CF-Drive' && r.body.result.capabilities.tools, 'initialize');
+  const n = await fetch(`${BASE}/api/v1/mcp`, { method: 'POST', headers: { ...H, 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) });
+  ok(n.status === 202, '通知回 202');
+  ok((await rpc('tools/list')).body.result.tools.length === 6, 'tools/list 6 个工具');
+  const up = await tool('upload', { dir: D, name: '笔记.md', text: '# 你好' }, undefined, 'mcp upload');
+  ok(!up.isError && up.structuredContent.data.node.name === '笔记.md', 'upload 工具 (自动建目录)');
+  ok((await (await fetch(up.structuredContent.url)).text()) === '# 你好', '返回的直链内容正确');
+  const bin = await tool('upload', { dir: D, name: 'b.bin', base64: Buffer.from([0, 1, 2, 255]).toString('base64'), mime: 'application/octet-stream' });
+  ok(!bin.isError && bin.structuredContent.data.node.size === 4, 'base64 上传');
+  const ls = await tool('list', { path: D }, undefined, 'mcp list');
+  ok(ls.structuredContent.children.map((c) => c.name).sort().join(',') === 'b.bin,笔记.md', 'list 工具');
+  ok((await tool('stat', { path: `${D}/b.bin` })).structuredContent.node.size === 4, 'stat 工具');
+  const lk = await tool('link', { path: `${D}/b.bin`, expiresIn: 60 });
+  ok(Buffer.from(await (await fetch(lk.structuredContent.url)).arrayBuffer()).equals(Buffer.from([0, 1, 2, 255])), 'link 工具');
+  const sh = await tool('share', { path: D, remark: 'mcp' });
+  ok((await (await fetch(sh.structuredContent.url)).json()).children.length === 2, 'share 工具 (目录分享)');
+  const miss = await tool('stat', { path: `${D}/nope` });
+  ok(miss.isError && /404/.test(miss.content[0].text), '接口错误变成 isError');
+  // 只读令牌不能上传; 受限令牌只看自己根下
+  const ro = (await j('POST', '/api/v1/admin/tokens', { name: 'e2e22m', scopes: ['read'], rootPath: D })).body.token;
+  const roUp = await tool('upload', { name: 'x.txt', text: 'x' }, `Bearer ${ro}`);
+  ok(roUp.isError && /403/.test(roUp.content[0].text), '只读令牌调 upload 返回 403');
+  ok((await tool('list', {}, `Bearer ${ro}`)).structuredContent.children.length === 2, '受限令牌的 / 是它自己的根目录');
+  ok((await rpc('tools/list', undefined, 'Bearer bad')).status === 401, '坏令牌 401');
+  ok((await fetch(`${BASE}/api/v1/mcp`, { headers: H })).status === 405, 'GET 405 (不开 SSE)');
+}
+
 console.log(`\n${pass} 项通过`);
 if (meter.length) { console.log('\nD1 实测 (查询 / 行读 / 行写):'); for (const [l, m] of meter) console.log(`  ${l}: ${m}`); }
