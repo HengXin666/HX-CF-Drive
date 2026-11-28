@@ -12,7 +12,7 @@ import {
 import { HttpError, newId, now, sha256Hex } from '../lib/util';
 import { runMaintenance } from '../services/maintenance';
 import { cachedStats, invalidateStats, liveUsage, putStats, STAT_KEYS, usageFromCounters } from '../services/stats';
-import { ensureParts, loadBlob, serveNode } from '../services/serve';
+import { ensureParts, IMMUTABLE, loadBlob, serveNode } from '../services/serve';
 import { commitUpload, foldReceipts, initUpload, openTicket, openTicketBare, putChunk, uploadStream } from '../services/upload';
 import { trash } from './trash';
 
@@ -36,9 +36,14 @@ async function locate(c: C, id?: string | null, path?: string | null): Promise<N
   return a.node;
 }
 
+/**
+ * 签名直链。有过期时间的链接带上内容版本 v (不参与签名): 内容没变时 /f 按剩余有效期给浏览器缓存, 覆盖上传后 v 对不上就不缓存。
+ * 永久直链不带 v, 保持地址稳定 (用户会拿去贴到别处)。
+ */
 export async function fileLink(env: Env, origin: string, node: NodeRow, expiresInSec = 0, tid = 'admin'): Promise<string> {
   const exp = expiresInSec > 0 ? Math.floor(Date.now() / 1000) + expiresInSec : 0;
-  return `${origin}/f/${node.id}/${encodeURIComponent(node.name)}?${await signLink(env.SIGNING_KEY, node.id, exp, tid)}`;
+  const v = exp && node.blob_id ? `&v=${encodeURIComponent(node.blob_id)}` : '';
+  return `${origin}/f/${node.id}/${encodeURIComponent(node.name)}?${await signLink(env.SIGNING_KEY, node.id, exp, tid)}${v}`;
 }
 
 /** 当前令牌签的直链 */
@@ -182,7 +187,13 @@ api.on(['GET', 'HEAD'], '/files/:id/content', requireScope('read'), async (c) =>
   if (!a) throw new HttpError(404, 'not found');
   await assertAccess(c.env, c.get('principal'), a.node.id, a.ancestors);
   const node = a.node;
-  return serveNode(c.env, node, c.req.raw, { download: c.req.query('download') === '1', waitUntil: (p) => c.executionCtx.waitUntil(p) });
+  // ?v= 是当前版本: 同一个 URL 的内容永远不变, 浏览器可以一直用缓存 (覆盖上传后版本变了, URL 跟着变)
+  const fresh = !!node.blob_id && c.req.query('v') === node.blob_id;
+  return serveNode(c.env, node, c.req.raw, {
+    download: c.req.query('download') === '1',
+    cacheControl: fresh ? IMMUTABLE : undefined,
+    waitUntil: (p) => c.executionCtx.waitUntil(p),
+  });
 });
 
 // ---------------- 上传 ----------------

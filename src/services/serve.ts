@@ -29,6 +29,8 @@ export interface ServeOptions {
   edgeCache?: boolean;
   /** attachment 下载而不是 inline 预览 */
   download?: boolean;
+  /** 覆盖默认的 Cache-Control (带了当前版本号 ?v= 时由路由给出长缓存) */
+  cacheControl?: string;
   waitUntil?: (p: Promise<unknown>) => void;
 }
 
@@ -98,6 +100,21 @@ export function fitBudget(r: ByteRange, chunkSize: number, budget: number, isWar
   return { start: r.start, end };
 }
 
+/** 客户端带回的版本号就是当前内容: ETag 是 blob id (内容寻址), 同一个 v 的内容永远不变 */
+export const IMMUTABLE = 'private, max-age=31536000, immutable';
+
+/**
+ * If-None-Match 比较: 支持多值 ("a", "b") 和 *, 忽略 W/ 前缀。
+ * CF 压缩 text/json/svg 时会把强 ETag 改成 W/"...", 浏览器回传弱 ETag, 严格相等永远对不上 (#23)
+ */
+export function etagMatches(header: string | null, etag: string): boolean {
+  if (!header) return false;
+  return header.split(',').some((t) => {
+    const v = t.trim();
+    return v === '*' || v.replace(/^W\//, '') === etag;
+  });
+}
+
 export async function serveNode(env: Env, node: NodeRow, req: Request, opt: ServeOptions = {}): Promise<Response> {
   if (node.kind !== 'file' || !node.blob_id) throw new HttpError(400, 'not a file');
   const etag = `"${node.blob_id}"`;
@@ -107,13 +124,13 @@ export async function serveNode(env: Env, node: NodeRow, req: Request, opt: Serv
     ETag: etag,
     'Last-Modified': new Date(node.updated_at).toUTCString(),
     'Content-Disposition': `${opt.download ? 'attachment' : 'inline'}; filename*=UTF-8''${encodeURIComponent(node.name)}`,
-    'Cache-Control': opt.edgeCache ? 'public, max-age=86400' : 'private, max-age=0',
+    'Cache-Control': opt.cacheControl ?? (opt.edgeCache ? 'public, max-age=86400' : 'private, max-age=0'),
     ...SAFE_HEADERS,
   };
   // PDF 内置查看器在 CSP sandbox 下无法打开, 只给它去掉 sandbox (PDF 里的脚本本身就跑在查看器沙箱里, 碰不到本站)
   if (node.mime?.startsWith('application/pdf')) base['Content-Security-Policy'] = CSP_PDF;
   // 304 与 HEAD 都不需要读 blob
-  if (req.headers.get('If-None-Match') === etag) return new Response(null, { status: 304, headers: base });
+  if (etagMatches(req.headers.get('If-None-Match'), etag)) return new Response(null, { status: 304, headers: base });
   // 空文件: 不碰 blob 和 TG, Range 一律忽略
   if (node.size === 0) return new Response(req.method === 'HEAD' ? null : '', { status: 200, headers: { ...base, 'Content-Length': '0' } });
 

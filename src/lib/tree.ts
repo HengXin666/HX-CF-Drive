@@ -305,5 +305,7 @@ export function publicNode(n: NodeRow) {
     parentId: n.parent_id,
     createdAt: n.created_at,
     updatedAt: n.updated_at,
+    /** 内容版本 (= ETag, 内容寻址)。读内容时带 ?v= 且仍是当前版本, 响应可以被浏览器长期缓存 (#23) */
+    version: n.blob_id,
   };
 }

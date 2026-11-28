@@ -109,7 +109,9 @@ export function load(n: Node): Promise<string> {
       if (d) return memPut(k, d);
       await slot();
       try {
-        const r = await fetch(`/api/v1/files/${encodeURIComponent(n.id)}/content`, { headers: { Authorization: `Bearer ${auth.get()}` } });
+        // 带上内容版本: 服务端回 immutable, 浏览器 HTTP 缓存也能命中 (Cache Storage 不可用的非安全上下文也受益)
+        const v = n.version ? `?v=${encodeURIComponent(n.version)}` : '';
+        const r = await fetch(`/api/v1/files/${encodeURIComponent(n.id)}/content${v}`, { headers: { Authorization: `Bearer ${auth.get()}` } });
         if (!r.ok) throw new Error(((await r.json().catch(() => ({}))) as { error?: string }).error ?? `HTTP ${r.status}`);
         const b = await r.blob();
         void diskPut(k, b).catch(() => {});

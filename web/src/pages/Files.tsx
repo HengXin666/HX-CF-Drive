@@ -10,7 +10,7 @@ import { Meta, Page } from '../components/Shell';
 import { type Column, DataTable } from '../components/Table';
 import { UploadQueue, uploads } from '../components/UploadQueue';
 import { fileIcon } from '../icons';
-import { admin, ApiError, fmtSize, fmtTime, fs, joinPath, type Node, shares, type TokenRow } from '../lib/api';
+import { admin, ApiError, fmtSize, fmtTime, fs, joinPath, type Node, shares, tempLink, type TokenRow } from '../lib/api';
 import { isImage, load as loadImage, peek, usePrefs, wantsPreview } from '../lib/imgcache';
 import { download } from '../lib/transfer';
 import {
@@ -127,7 +127,7 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
       a.click();
       return;
     }
-    const { url } = await fs.link(n.id, 3600);
+    const url = await tempLink(n);
     await download(url, n.name, n.size, () => {});
   };
   const open = async (n: Node) => {
@@ -139,7 +139,7 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
       setPreview((p) => (p?.node.id === n.id ? { node: n, url } : p));
       return;
     }
-    const { url } = await fs.link(n.id, 3600);
+    const url = await tempLink(n);
     if (/^(image|video|audio)\//.test(n.mime ?? '') || n.mime === 'application/pdf' || n.mime?.startsWith('text/')) setPreview({ node: n, url });
     else await download(url, n.name, n.size, () => {});
   };

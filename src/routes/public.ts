@@ -26,8 +26,12 @@ pub.on(['GET', 'HEAD'], ['/f/:id', '/f/:id/:name'], async (c) => {
   if (!Number.isFinite(exp) || !(await verifyLink(c.env.SIGNING_KEY, id, exp, sig, undefined, tid))) throw new HttpError(403, 'bad or expired signature');
   if (!(await tokenAlive(c.env, tid))) throw new HttpError(403, 'link revoked');
   const node = await cachedNode(c.env, id);
+  // 有过期时间且带着当前版本 v 的链接: 按剩余有效期 (最多 1 小时) 让浏览器缓存, 重复打开同一预览不再回源
+  const left = exp - Math.floor(Date.now() / 1000);
+  const fresh = exp > 0 && left > 0 && !!node.blob_id && c.req.query('v') === node.blob_id;
   return serveNode(c.env, node, c.req.raw, {
     edgeCache: exp === 0,
+    cacheControl: fresh ? `private, max-age=${Math.min(left, 3600)}` : undefined,
     download: c.req.query('download') === '1',
     waitUntil: (p) => c.executionCtx.waitUntil(p),
   });

@@ -33,3 +33,20 @@ describe('孤儿清扫 rowid 水位 (#23)', () => {
     expect(sw.r).toBe(60);
   });
 });
+
+import { etagMatches } from '../src/services/serve';
+
+describe('If-None-Match (#23)', () => {
+  const tag = '"abc"';
+  it('强 / 弱 ETag, 多值, * 都能匹配', () => {
+    expect(etagMatches('"abc"', tag)).toBe(true);
+    expect(etagMatches('W/"abc"', tag)).toBe(true);
+    expect(etagMatches('"x", W/"abc"', tag)).toBe(true);
+    expect(etagMatches('*', tag)).toBe(true);
+  });
+  it('不匹配或没带', () => {
+    expect(etagMatches(null, tag)).toBe(false);
+    expect(etagMatches('"abcd"', tag)).toBe(false);
+    expect(etagMatches('W/"x"', tag)).toBe(false);
+  });
+});

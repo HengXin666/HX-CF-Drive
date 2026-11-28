@@ -28,7 +28,7 @@ export const GROUPS: Group[] = [
       { method: 'POST', path: '/api/v1/fs/trash/empty', scope: 'write', desc: '清空回收站 (受限令牌只清自己根下的)', resp: '{"nodes":3,"blobs":2,"more":0,"leftNodes":0,"leftBlobs":0}' },
       { method: 'GET', path: '/api/v1/fs/search?q=cat&limit=50', scope: 'read', desc: '文件名模糊搜索, 每令牌每分钟限 6 次, 超出 429', resp: '{"items":[Node & {path}]}' },
       { method: 'POST', path: '/api/v1/fs/link', scope: 'read', desc: '签名直链, expiresIn 秒, 0 为永久', body: '{"path":"/a.png","expiresIn":0}', resp: '{"url":"https://.../f/<id>/a.png?e=0&s=..."}' },
-      { method: 'GET', path: '/api/v1/files/<id>/content', scope: 'read', desc: '读取内容, 支持 Range; ?download=1 以附件下载' },
+      { method: 'GET', path: '/api/v1/files/<id>/content?v=<version>', scope: 'read', desc: '读取内容, 支持 Range 与 If-None-Match (弱 ETag / 多值); ?download=1 以附件下载。v 填节点的 version (列表里有), 仍是当前版本时响应带 immutable, 浏览器可长期缓存' },
     ],
   },
   {

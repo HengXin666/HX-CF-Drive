@@ -12,14 +12,28 @@ export interface Node {
   updatedAt: number;
   path?: string;
   deletedAt?: number;
+  /** 内容版本 (= ETag)。读内容时带 ?v= 可被浏览器长期缓存 */
+  version?: string | null;
 }
 
 const KEY = 'hxd_token';
 export const auth = {
   get: () => localStorage.getItem(KEY) ?? '',
   set: (t: string) => localStorage.setItem(KEY, t),
-  clear: () => localStorage.removeItem(KEY),
+  clear: () => { localStorage.removeItem(KEY); linkCache.clear(); },
 };
+
+/** 预览 / 下载用的 1 小时签名链接, 按 (节点, 内容版本) 缓存到过期前 5 分钟: 重复打开同一文件不再签 (#23) */
+const linkCache = new Map<string, { url: string; until: number }>();
+export async function tempLink(n: Node): Promise<string> {
+  const k = `${n.id}:${n.version ?? n.updatedAt}`;
+  const hit = linkCache.get(k);
+  if (hit && hit.until > Date.now()) return hit.url;
+  const { url } = await fs.link(n.id, 3600);
+  if (linkCache.size > 500) linkCache.clear();
+  linkCache.set(k, { url, until: Date.now() + 55 * 60_000 });
+  return url;
+}
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public retryAfter?: number) {
