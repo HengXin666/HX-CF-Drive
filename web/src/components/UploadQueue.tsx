@@ -20,8 +20,10 @@ async function prepare(it: Item): Promise<Item> {
     const out = await compressImage(it.file, prefs).catch(() => null);
     if (out) { file = out; note = `${fmtSize(it.file.size)} → ${fmtSize(out.size)}`; }
   }
-  const next = { ...it, file, prepared: true, note };
-  patch(it.id, { file, prepared: true, note });
+  // 上传设置里的自动删除 (#22 TTL)
+  const opts = prefs.ttl > 0 && !it.opts?.expiresIn ? { ...it.opts, expiresIn: prefs.ttl } : it.opts;
+  const next = { ...it, file, prepared: true, note, opts };
+  patch(it.id, { file, prepared: true, note, opts });
   return next;
 }
 

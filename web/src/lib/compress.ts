@@ -8,10 +8,12 @@ export interface CompressPrefs {
   quality: number;
   /** 最长边像素, 0 为不缩放 */
   maxEdge: number;
+  /** 上传后多少秒自动删除 (#22 TTL), 0 为不删除。不只对图片, 对所有上传生效 */
+  ttl: number;
 }
 
 const KEY = 'hxd_upload_img';
-export const DEFAULT_PREFS: CompressPrefs = { on: false, webp: true, quality: 0.85, maxEdge: 0 };
+export const DEFAULT_PREFS: CompressPrefs = { on: false, webp: true, quality: 0.85, maxEdge: 0, ttl: 0 };
 
 export function getPrefs(): CompressPrefs {
   try { return { ...DEFAULT_PREFS, ...JSON.parse(localStorage.getItem(KEY) ?? '{}') }; } catch { return DEFAULT_PREFS; }

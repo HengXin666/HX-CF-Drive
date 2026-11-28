@@ -94,6 +94,15 @@ on('POST', '/fs/batch', 'write', async (c) => {
   return json(200, { ok, failed, ...(to ? { nodes } : {}) });
 });
 
+// 设置 / 取消到期时间 (#22), 同 /fs/expire
+on('POST', '/fs/expire', 'write', async (c) => {
+  const b = await c.body();
+  const n = locate(b.id, b.path);
+  if (n.id === ROOT) throw new HttpError(400, 'cannot expire root');
+  n.expiresAt = ttlAt(b.expiresIn);
+  return json(200, { node: publicNode(n) });
+});
+
 on('GET', '/fs/trash', 'write', () => json(200, { items: trashList() }));
 
 on('POST', '/fs/restore', 'write', async (c) => {
@@ -148,14 +157,22 @@ on('(GET|HEAD)', '/files/([^/]+)/content', 'read', (c, m) => {
 // ---------------- 上传 ----------------
 
 /** 落一个文件节点: 内容按 sha256 去重 */
-async function putFile(parentId: string, name: string, data: Blob, mime: string | null, overwrite: boolean) {
+/** TTL (#22): 秒 → 到期时间 */
+function ttlAt(v: unknown): number | null {
+  if (v === undefined || v === null || v === '' || Number(v) === 0) return null;
+  const sec = Number(v);
+  if (!Number.isFinite(sec) || sec < 60 || sec > 10 * 365 * 86400) throw new HttpError(400, 'expiresIn must be 60..315360000 seconds');
+  return now() + sec * 1000;
+}
+
+async function putFile(parentId: string, name: string, data: Blob, mime: string | null, overwrite: boolean, expiresAt: number | null = null) {
   claimName(parentId, name, overwrite);
   const id = await sha256Hex(data);
   if (!state().blobs[id]) {
     await putData(id, data);
     state().blobs[id] = { id, size: data.size, refs: 0 };
   }
-  return insert({ parentId, name, kind: 'file', size: data.size, mime, blobId: id });
+  return insert({ parentId, name, kind: 'file', size: data.size, mime, blobId: id, expiresAt });
 }
 
 on('POST', '/uploads', 'write', async (c) => {
@@ -164,17 +181,18 @@ on('POST', '/uploads', 'write', async (c) => {
   const size = Number(b.size) || 0;
   const parent = str(b.parentId) ? locate(b.parentId) : b.mkdirs === false ? locate(null, b.path) : mkdirp(str(b.path) ?? '/');
   const mime = str(b.mime) ?? null;
+  const expiresAt = ttlAt(b.expiresIn);
   claimName(parent.id, name, !!b.overwrite);
   // 秒传: 已有相同 sha256 的数据块就直接建节点
   const hit = str(b.sha256) ? state().blobs[String(b.sha256).toLowerCase()] : undefined;
   if (size === 0 || (hit && hit.size === size)) {
-    const node = size === 0 ? await putFile(parent.id, name, new Blob([]), mime, !!b.overwrite)
-      : insert({ parentId: parent.id, name, kind: 'file', size, mime, blobId: hit!.id });
+    const node = size === 0 ? await putFile(parent.id, name, new Blob([]), mime, !!b.overwrite, expiresAt)
+      : insert({ parentId: parent.id, name, kind: 'file', size, mime, blobId: hit!.id, expiresAt });
     return json(200, { done: true, node: publicNode(node), url: fileLink(node) });
   }
   const ticket = `t_${newId(24)}`;
   const chunkCount = Math.max(1, Math.ceil(size / CHUNK));
-  state().tickets[ticket] = { ticket, parentId: parent.id, name, size, mime, overwrite: !!b.overwrite, chunkSize: CHUNK, chunkCount };
+  state().tickets[ticket] = { ticket, parentId: parent.id, name, size, mime, overwrite: !!b.overwrite, chunkSize: CHUNK, chunkCount, expiresAt };
   return json(200, { done: false, ticket, chunkSize: CHUNK, chunkCount });
 });
 
@@ -219,7 +237,7 @@ on('POST', '/uploads/commit', 'write', async (c) => {
     if (!p) throw new HttpError(400, `missing chunks: ${i}`);
     parts.push(p);
   }
-  const node = await putFile(t.parentId, t.name, new Blob(parts, { type: t.mime ?? '' }), t.mime, t.overwrite);
+  const node = await putFile(t.parentId, t.name, new Blob(parts, { type: t.mime ?? '' }), t.mime, t.overwrite, t.expiresAt ?? null);
   for (let i = 0; i < t.chunkCount; i++) await delData(`chunk:${t.ticket}:${i}`);
   delete state().tickets[t.ticket];
   return json(200, { node: publicNode(node), url: fileLink(node) });
@@ -229,6 +247,7 @@ on('POST', '/uploads/commit', 'write', async (c) => {
 on('POST', '/upload', 'write', async ({ req, url }) => {
   const parent = mkdirp(url.searchParams.get('path') ?? '/');
   const overwrite = url.searchParams.get('overwrite') === '1';
+  const expiresAt = ttlAt(url.searchParams.get('expiresIn'));
   const rename = (n: string) => (url.searchParams.get('rename') === '1'
     ? `${new Date().toISOString().slice(0, 10)}-${newId(8)}${n.lastIndexOf('.') > 0 ? n.slice(n.lastIndexOf('.')) : ''}` : n);
   const files: { name: string; data: Blob; mime: string | null }[] = [];
@@ -242,7 +261,7 @@ on('POST', '/upload', 'write', async ({ req, url }) => {
   if (!files.length) throw new HttpError(400, 'no file');
   const results = [];
   for (const f of files) {
-    const node = await putFile(parent.id, f.name, f.data, f.mime, overwrite);
+    const node = await putFile(parent.id, f.name, f.data, f.mime, overwrite, expiresAt);
     results.push({ node: publicNode(node), url: fileLink(node) });
   }
   return json(200, { success: true, url: results[0].url, data: results[0], files: results });

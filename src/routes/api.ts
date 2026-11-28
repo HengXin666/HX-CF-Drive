@@ -7,7 +7,7 @@ import { forgetToken, requireScope } from '../lib/auth';
 import { signLink } from '../lib/sign';
 import {
   assertAccess, getNode, getNodeAccessCached, getNodeWithAncestors, listChildren, listChildrenPage, mkdirp, moveNode, type NodeRow, pathFor, pathsOf, publicNode, resolvePath, trashNode,
-  pathsOfIds, subtree,
+  pathsOfIds, subtree, forgetNode,
 } from '../lib/tree';
 import { HttpError, newId, now, sha256Hex } from '../lib/util';
 import { runMaintenance } from '../services/maintenance';
@@ -301,15 +301,39 @@ api.on(['GET', 'HEAD'], '/files/:id/content', requireScope('read'), async (c) =>
 
 // ---------------- 上传 ----------------
 
+/** TTL (#22): 秒数 → 到期时间 (毫秒)。不传或 0 为不过期; 1 分钟到 10 年之间 */
+const TTL_MAX = 10 * 365 * 86400;
+function ttlAt(v: unknown): number | null {
+  if (v === undefined || v === null || v === '' || Number(v) === 0) return null;
+  const sec = Number(v);
+  if (!Number.isFinite(sec) || sec < 60 || sec > TTL_MAX) throw new HttpError(400, `expiresIn must be 60..${TTL_MAX} seconds`);
+  return now() + Math.round(sec * 1000);
+}
+
+/**
+ * 给已有的文件或目录设置 / 取消到期时间 (#22): { id | path, expiresIn: 秒 | null }。到期后访问返回 410, 维护时移进回收站 (目录连同内容)。
+ * 写 1 行 (+ 部分索引 1 行)。
+ */
+api.post('/fs/expire', requireScope('write'), async (c) => {
+  const b = await c.req.json<{ id?: string; path?: string; expiresIn?: number | null }>();
+  const node = await locate(c, b.id, b.path);
+  if (node.id === 'root' || node.id === c.get('principal').rootId) throw new HttpError(400, 'cannot expire root');
+  const at = ttlAt(b.expiresIn);
+  await c.env.DB.prepare('UPDATE nodes SET expires_at = ? WHERE id = ?').bind(at, node.id).run();
+  forgetNode(node.id);
+  return c.json({ node: publicNode({ ...node, expires_at: at }) });
+});
+
 /** 第 1 步: 申请上传。带 sha256 时可能直接秒传完成 */
 api.post('/uploads', requireScope('write'), async (c) => {
-  const b = await c.req.json<{ parentId?: string; path?: string; name: string; size: number; mime?: string; sha256?: string; overwrite?: boolean; mkdirs?: boolean }>();
+  const b = await c.req.json<{ parentId?: string; path?: string; name: string; size: number; mime?: string; sha256?: string; overwrite?: boolean; mkdirs?: boolean; expiresIn?: number }>();
+  const expiresAt = ttlAt(b.expiresIn);
   const p = c.get('principal');
   let parent: NodeRow;
   if (b.parentId) parent = await locate(c, b.parentId);
   else if (b.mkdirs !== false) parent = await mkdirp(c.env, p.rootId, b.path ?? '/');
   else parent = await locate(c, null, b.path ?? '/');
-  const r = await initUpload(c.env, p, { parentId: parent.id, parent, name: b.name, size: b.size, mime: b.mime, sha256: b.sha256, overwrite: b.overwrite });
+  const r = await initUpload(c.env, p, { parentId: parent.id, parent, name: b.name, size: b.size, mime: b.mime, sha256: b.sha256, overwrite: b.overwrite, expiresAt });
   if (r.done) return c.json({ done: true, node: publicNode(r.node), url: await linkFor(c, r.node) });
   // chunkUrl: 公网分片地址, 只凭票据就能传 (v0.4); 调用方据此判断能否让客户端直传
   return c.json({ ...r, chunkUrl: `${publicOrigin(c.env, c.req.url)}/api/v1/uploads/chunk` });
@@ -358,6 +382,7 @@ api.post('/upload', requireScope('write'), async (c) => {
   const path = c.req.query('path') ?? '/';
   const ct = c.req.header('Content-Type') ?? '';
   const overwrite = c.req.query('overwrite') === '1';
+  const expiresAt = ttlAt(c.req.query('expiresIn'));
   const parent = await mkdirp(c.env, p.rootId, path);
   const results = [];
   if (ct.startsWith('multipart/form-data')) {
@@ -366,14 +391,14 @@ api.post('/upload', requireScope('write'), async (c) => {
       if (typeof v === 'string') continue;
       const f = v as File;
       const name = c.req.query('rename') === '1' ? renameRandom(f.name): f.name;
-      const node = await uploadStream(c.env, p, { parentId: parent.id, parent, name, size: f.size, mime: f.type || undefined, overwrite }, f.stream());
+      const node = await uploadStream(c.env, p, { parentId: parent.id, parent, name, size: f.size, mime: f.type || undefined, overwrite, expiresAt }, f.stream());
       results.push({ node: publicNode(node), url: await linkFor(c, node) });
     }
   } else {
     const name = c.req.query('name');
     const len = Number(c.req.header('Content-Length'));
     if (!name || !Number.isFinite(len)) throw new HttpError(400, 'raw upload needs ?name= and Content-Length');
-    const node = await uploadStream(c.env, p, { parentId: parent.id, parent, name, size: len, mime: ct || undefined, overwrite }, c.req.raw.body ?? new ReadableStream({ start: (ctl) => ctl.close() }));
+    const node = await uploadStream(c.env, p, { parentId: parent.id, parent, name, size: len, mime: ct || undefined, overwrite, expiresAt }, c.req.raw.body ?? new ReadableStream({ start: (ctl) => ctl.close() }));
     results.push({ node: publicNode(node), url: await linkFor(c, node) });
   }
   if (results.length === 0) throw new HttpError(400, 'no file');

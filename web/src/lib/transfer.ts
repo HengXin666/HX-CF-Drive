@@ -15,7 +15,7 @@ const PART = 256;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export interface UploadOpts { name?: string; overwrite?: boolean }
+export interface UploadOpts { name?: string; overwrite?: boolean; /** 多少秒后自动删除 (#22 TTL) */ expiresIn?: number }
 
 /**
  * 小于这个大小的文件走一次性上传 POST /upload: 1 个请求 (分片流程是 init + chunk + commit 3 个), 也不用先算哈希。
@@ -24,9 +24,9 @@ export interface UploadOpts { name?: string; overwrite?: boolean }
 export const SINGLE_MAX = 1024 * 1024;
 
 /** 一次性上传小文件; TG 限流时服务端回 429, 按 Retry-After 重试 (请求体是 Blob, 可以重发) */
-async function uploadSmall(file: File, dir: string, name: string, overwrite: boolean, onProgress: (p: Progress) => void): Promise<Node> {
+async function uploadSmall(file: File, dir: string, name: string, overwrite: boolean, onProgress: (p: Progress) => void, expiresIn?: number): Promise<Node> {
   onProgress({ phase: 'upload', ratio: 0 });
-  const q = new URLSearchParams({ path: dir, name, ...(overwrite ? { overwrite: '1' } : {}) });
+  const q = new URLSearchParams({ path: dir, name, ...(overwrite ? { overwrite: '1' } : {}), ...(expiresIn ? { expiresIn: String(expiresIn) } : {}) });
   for (let tries = 0; ; tries++) {
     const r = await fetch(`/api/v1/upload?${q}`, {
       method: 'POST',
@@ -47,11 +47,11 @@ export async function uploadFile(file: File, dir: string, onProgress: (p: Progre
   const name = opts.name ?? file.name;
   const key = `hxd_up:${dir}:${name}:${file.size}:${file.lastModified}`;
   let state = JSON.parse(localStorage.getItem(key) ?? 'null') as State | null;
-  if (!state && file.size > 0 && file.size < SINGLE_MAX) return uploadSmall(file, dir, name, !!opts.overwrite, onProgress);
+  if (!state && file.size > 0 && file.size < SINGLE_MAX) return uploadSmall(file, dir, name, !!opts.overwrite, onProgress, opts.expiresIn);
   if (!state) {
     const sha256 = file.size ? await sha256File(file, (r) => onProgress({ phase: 'hash', ratio: r })) : undefined;
     const init = await api<{ done: boolean; ticket: string; chunkSize: number; chunkCount: number; node?: Node }>('POST', '/uploads', {
-      path: dir, name, size: file.size, mime: file.type || undefined, sha256, overwrite: !!opts.overwrite,
+      path: dir, name, size: file.size, mime: file.type || undefined, sha256, overwrite: !!opts.overwrite, expiresIn: opts.expiresIn,
     });
     if (init.done) { onProgress({ phase: 'done', ratio: 1, note: file.size ? '秒传' : undefined }); return init.node ?? null; }
     state = { ticket: init.ticket, chunkSize: init.chunkSize, chunkCount: init.chunkCount, receipts: {} };

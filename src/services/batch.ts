@@ -149,7 +149,7 @@ export async function runBatch(env: Env, p: Principal, b: BatchReq): Promise<Bat
     }
     if (go.length) {
       await env.DB.prepare(
-        `UPDATE nodes SET parent_id = j.p, name = j.name, deleted_at = NULL
+        `UPDATE nodes SET parent_id = j.p, name = j.name, deleted_at = NULL, expires_at = NULL
          FROM (SELECT json_extract(value, '$[0]') AS id, json_extract(value, '$[1]') AS p, json_extract(value, '$[2]') AS name FROM json_each(?1)) AS j
          WHERE nodes.id = j.id AND nodes.deleted_at > 1`,
       ).bind(JSON.stringify(go)).run();

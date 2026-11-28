@@ -176,5 +176,41 @@ if (sect('search')) {
   ok((await s({ type: 'bogus' })).status === 400 && (await s({})).status === 400, '坏类型 / 什么都不给 400');
 }
 
+if (sect('ttl')) {
+  const D = `${P}/ttl`;
+  // 小文件一次性上传带 TTL
+  const r1 = await fetch(`${BASE}/api/v1/upload?path=${encodeURIComponent(D)}&name=t.txt&expiresIn=60`, { method: 'POST', headers: { ...H, 'Content-Type': 'text/plain' }, body: 'tmp' });
+  const n1 = (await r1.json()).data;
+  if (r1.headers.get('X-D1-Rows')) meter.push(['一次性上传带 expiresIn', r1.headers.get('X-D1-Rows')]);
+  ok(n1.node.expiresAt > Date.now() + 50_000 && n1.node.expiresAt < Date.now() + 70_000, '上传带 expiresIn, 返回 expiresAt');
+  ok((await (await fetch(n1.url)).text()) === 'tmp', '到期前可以访问');
+  ok((await j('POST', '/api/v1/uploads', { path: D, name: 'x', size: 10, expiresIn: 5 })).status === 400, 'expiresIn 小于 60 秒 400');
+  // 分片上传带 TTL: 凭证里带着, commit 时写进节点
+  const init = (await j('POST', '/api/v1/uploads', { path: D, name: 'big.bin', size: 3, expiresIn: 3600 })).body;
+  const rc = (await (await fetch(`${BASE}/api/v1/uploads/chunk?i=0&ticket=${encodeURIComponent(init.ticket)}`, { method: 'PUT', headers: H, body: 'abc' })).json()).receipt;
+  const big = (await j('POST', '/api/v1/uploads/commit', { ticket: init.ticket, receipts: [rc] })).body.node;
+  ok(big.expiresAt > Date.now() + 3500_000, '分片上传 commit 后带 expiresAt');
+  // 把到期时间改到过去: 直接调 /fs/expire 不允许 < 60 秒, 用 D1 本地改不了, 所以改成取消 + 再设置检验接口
+  let r = await j('POST', '/api/v1/fs/expire', { id: big.id, expiresIn: null }, {}, 'fs/expire 取消');
+  ok(r.status === 200 && r.body.node.expiresAt === null, '/fs/expire 取消到期');
+  r = await j('POST', '/api/v1/fs/expire', { path: D, expiresIn: 120 });
+  ok(r.status === 200 && r.body.node.kind === 'dir' && r.body.node.expiresAt > Date.now(), '目录也能设到期');
+  ok((await j('GET', `/api/v1/fs/list?path=${encodeURIComponent(D)}`)).body.children.find((c) => c.name === 't.txt').expiresAt === n1.node.expiresAt, '列表带 expiresAt');
+  // 真的到期: 本地 D1 (LOCAL_D1=1, 在仓库根目录跑) 把一个从没读过的文件的 expires_at 改到过去, 验证 410 和维护清理
+  if (process.env.LOCAL_D1) {
+    const { execSync } = await import('node:child_process');
+    const r2 = await fetch(`${BASE}/api/v1/upload?path=${encodeURIComponent(D + '/gone')}&name=g.txt&expiresIn=600`, { method: 'POST', headers: { ...H, 'Content-Type': 'text/plain' }, body: 'gone' });
+    const g = (await r2.json()).data;
+    execSync(`npx wrangler d1 execute hx-cf-drive --local --persist-to .wrangler/state --command "UPDATE nodes SET expires_at = ${Date.now() - 1000} WHERE id = '${g.node.id}'"`, { stdio: 'ignore' });
+    ok((await fetch(g.url)).status === 410, '真的到期后直链返回 410');
+    ok((await fetch(`${BASE}/api/v1/files/${g.node.id}/content`, { headers: H })).status === 410, '真的到期后 API 读内容 410');
+    const m = await j('POST', '/api/v1/admin/maintenance?sweep=0', undefined, {}, '维护 (含到期清理)');
+    ok(m.status === 200 && m.body.expired >= 1, `维护任务把到期节点移进回收站 (expired=${m.body.expired})`);
+    ok(!(await j('GET', `/api/v1/fs/list?path=${encodeURIComponent(D + '/gone')}`)).body.children.some((c) => c.id === g.node.id), '到期节点已不在目录里');
+    const tr = await j('GET', '/api/v1/fs/trash');
+    ok(JSON.stringify(tr.body).includes(g.node.id), '到期节点在回收站里');
+  }
+}
+
 console.log(`\n${pass} 项通过`);
 if (meter.length) { console.log('\nD1 实测 (查询 / 行读 / 行写):'); for (const [l, m] of meter) console.log(`  ${l}: ${m}`); }

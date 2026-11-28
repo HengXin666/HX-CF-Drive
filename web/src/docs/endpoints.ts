@@ -29,6 +29,7 @@ export const GROUPS: Group[] = [
       { method: 'POST', path: '/api/v1/fs/trash/empty', scope: 'write', desc: '清空回收站 (受限令牌只清自己根下的)', resp: '{"nodes":3,"blobs":2,"more":0,"leftNodes":0,"leftBlobs":0}' },
       { method: 'GET', path: '/api/v1/fs/search?q=cat&type=image&dir=/photos&limit=50', scope: 'read', desc: '搜索: q 文件名模糊匹配, type 按类型 (image / video / audio / doc / archive / other, 先看 MIME 再看扩展名), 至少给一个; dir (或 dirId) 只搜该目录子树, 读行 ≈ 子树大小, 比全表便宜。每令牌每分钟限 6 次, 超出 429', resp: '{"items":[Node & {path}]}' },
       { method: 'POST', path: '/api/v1/fs/link', scope: 'read', desc: '签名直链, expiresIn 秒, 0 为永久', body: '{"path":"/a.png","expiresIn":0}', resp: '{"url":"https://.../f/<id>/a.png?e=0&s=..."}' },
+      { method: 'POST', path: '/api/v1/fs/expire', scope: 'write', desc: '到期自动删除 (TTL): expiresIn 秒 (60 ~ 10 年), null 取消。到期后访问返回 410, 定时维护移进回收站 (目录连同内容)。上传时也可以直接带: /upload?expiresIn=, /uploads 的 expiresIn', body: '{"path":"/tmp/a.log","expiresIn":86400}', resp: '{"node":Node}' },
       { method: 'POST', path: '/api/v1/fs/links', scope: 'read', desc: '批量签直链 (最多 200 个, 按请求顺序返回), 不是文件或无权访问的 id 放进 missing。2 次查询', body: '{"ids":["<id1>","<id2>"],"expiresIn":0}', resp: '{"items":[{"id":"...","name":"a.png","mime":"image/png","url":"..."}],"missing":[]}' },
       { method: 'GET', path: '/api/v1/files/<id>/content?v=<version>', scope: 'read', desc: '读取内容, 支持 Range 与 If-None-Match (弱 ETag / 多值); ?download=1 以附件下载。v 填节点的 version (列表里有), 仍是当前版本时响应带 immutable, 浏览器可长期缓存' },
     ],

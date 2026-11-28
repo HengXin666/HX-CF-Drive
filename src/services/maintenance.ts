@@ -4,6 +4,7 @@
  * 2. 回收站超期 → 硬删除节点, blob 引用减一
  * 3. 引用归零的 blob → deleteMessages 批量删 TG 消息, 删行
  * 4. 孤儿消息清扫: 上传了但没 commit 的分片 (见 sweep.ts), 用剩下的 TG 预算
+ * 2'. 到期的节点 (#22 TTL) 移进回收站, deleted_at 记为到期时间, 回收站保留期从到期起算
  * 5. 重算用量快照 (见 stats.ts): 每轮一次全表扫描, /admin/stats 只读快照
  * 返回 more=1 表示还有积压, 调用方可以接着调 (maintenance.yml 会循环)。
  * 没有活干时只有几次空查询, D1 读写接近零。
@@ -34,6 +35,10 @@ export async function runMaintenance(env: Env, opts: { sweep?: boolean } = {}): 
   }
   if (revived) invalidateBotCache();
 
+  // 2'. 到期节点进回收站: 走 expires_at 部分索引, 没有到期的只读 0 行
+  const expired = (await env.DB.prepare('UPDATE nodes SET deleted_at = expires_at WHERE expires_at IS NOT NULL AND expires_at < ? AND deleted_at IS NULL')
+    .bind(Date.now()).run()).meta.changes ?? 0;
+
   // 2, 3. 硬删除
   // 留 2 个给孤儿清扫的探针, 保证每轮都能记下水位
   const r = await purgeAll(env, Math.max(budget - 2, 1), 300);
@@ -45,5 +50,5 @@ export async function runMaintenance(env: Env, opts: { sweep?: boolean } = {}): 
 
   // 5. 用量快照: 循环调用 (?sweep=0) 时不重复算
   if (opts.sweep !== false) await snapshotUsage(env);
-  return { seeded, revived, ...r, ...s };
+  return { seeded, revived, expired, ...r, ...s };
 }

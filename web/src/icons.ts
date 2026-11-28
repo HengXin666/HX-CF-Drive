@@ -3,7 +3,7 @@ import {
   ArrowLeft, BookOpen, Check, ChevronRight, CircleAlert, Copy, Cpu, Database, Download, Eye, FileArchive, FileCode2,
   FileText, Film, Folder, FolderInput, FolderOpen, FolderPlus, FolderTree, House, Image, KeyRound, Link2, Lock, LogOut, type LucideIcon,
   Moon, Music, MoreHorizontal, Pencil, Plus, RefreshCw, RotateCcw, Search, Send, Server, Settings, Share2, ShieldCheck,
-  Sun, Trash2, Upload, X, Info, Rocket, HardDrive, LoaderCircle, FolderUp, ClipboardPaste, SlidersHorizontal, LayoutGrid, List, ListFilter,
+  Sun, Trash2, Upload, X, Info, Rocket, HardDrive, LoaderCircle, FolderUp, ClipboardPaste, SlidersHorizontal, LayoutGrid, List, ListFilter, Clock,
 } from 'lucide-react';
 
 export const ICON = {
@@ -60,6 +60,7 @@ export const ICON = {
   grid: LayoutGrid,
   list: List,
   filter: ListFilter,
+  clock: Clock,
 } satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof ICON;

@@ -25,6 +25,7 @@ export const shareLink = (id: string) => `${location.origin}${BASE}s/${id}`;
 /** 按节点返回内容, 处理 Range 和 ?download=1 */
 export async function serveNode(n: DNode, req: Request, download: boolean): Promise<Response> {
   if (n.kind !== 'file') throw new HttpError(400, 'not a file');
+  if (n.expiresAt && n.expiresAt < now()) throw new HttpError(410, 'expired');
   const blob = n.blobId ? state().blobs[n.blobId] : null;
   if (blob?.virtual) throw new HttpError(404, '演示占位文件: 只有元数据, 没有实际内容');
   const data = (n.blobId && (await getData(n.blobId))) || new Blob([]);

@@ -117,6 +117,8 @@ export function etagMatches(header: string | null, etag: string): boolean {
 
 export async function serveNode(env: Env, node: NodeRow, req: Request, opt: ServeOptions = {}): Promise<Response> {
   if (node.kind !== 'file' || !node.blob_id) throw new HttpError(400, 'not a file');
+  // 到期的文件 (#22 TTL): 维护任务移进回收站之前也不能再读
+  if (node.expires_at && node.expires_at < Date.now()) throw new HttpError(410, 'expired');
   const etag = `"${node.blob_id}"`;
   const base: Record<string, string> = {
     'Content-Type': node.mime ?? 'application/octet-stream',

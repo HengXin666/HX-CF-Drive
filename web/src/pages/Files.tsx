@@ -27,6 +27,16 @@ const UploadSettings = lazy(() => import('../components/UploadSettings').then((m
 const RenameDialog = lazy(() => import('../components/RenameDialog').then((m) => ({ default: m.RenameDialog })));
 const Preview = lazy(() => import('../components/Preview').then((m) => ({ default: m.Preview })));
 
+/** 名字后面的到期标记: 已过期红色, 未到期显示剩余时间 */
+function Expiry({ at }: { at: number }) {
+  const left = at - Date.now();
+  const text = left <= 0 ? '已过期' : left < 3600_000 ? `${Math.ceil(left / 60_000)} 分钟后删除` : left < 86400_000 ? `${Math.ceil(left / 3600_000)} 小时后删除` : `${Math.ceil(left / 86400_000)} 天后删除`;
+  return (
+    <span title={`到期: ${fmtTime(at)}`} className={cn('inline-flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-xs', left <= 0 ? 'border-destructive/50 text-destructive' : 'text-muted-foreground')}>
+      <Icon name="clock" className="size-3" />{text}
+    </span>
+  );
+}
 const CAT_ICON: Record<Category, IconName> = { image: 'image', video: 'video', audio: 'audio', doc: 'fileText', archive: 'zip', other: 'more' };
 const parentOf = (p: string) => p.replace(/\/[^/]+\/?$/, '') || '/';
 /** 和服务端 listChildren 一样的顺序: 目录在前, 名字按 locale 不分大小写 */
@@ -239,6 +249,19 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
     title: '重命名', fields: [{ key: 'name', label: '新名称', value: n.name }],
     onOk: async (v) => { await fs.move(n.id, undefined, v.name.trim()); changed(); },
   });
+  /** 设置 / 取消到期 (#22 TTL) */
+  const expire = (n: Node) => setPrompt({
+    title: `${n.name} 到期自动删除`,
+    note: n.expiresAt ? `现在 ${fmtTime(n.expiresAt)} 到期。` : '到期后访问返回 410, 定时维护移进回收站 (目录连同内容)。',
+    fields: [{ key: 'days', label: '从现在起多少天后删除', type: 'number', placeholder: '如 0.5 = 12 小时', description: '留空或 0 为取消到期', value: '' }],
+    okText: '保存',
+    onOk: async (v) => {
+      const d = Number(v.days || 0);
+      await fs.expire(n.id, d > 0 ? Math.max(60, Math.round(d * 86400)) : null);
+      toast.success(d > 0 ? '已设置到期时间' : '已取消到期');
+      changed();
+    },
+  });
   const mkdir = () => setPrompt({
     title: '新建目录', fields: [{ key: 'name', label: '目录名' }],
     onOk: async (v) => { await fs.mkdir(joinPath(path, v.name.trim())); changed(); },
@@ -299,8 +322,8 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
 
   // 列定义 memo 化 (#23): 只在图片开关或搜索状态变化时重建, 表格 (TanStack 列定义) 不再每次 render 都重算;
   // 列里用到的操作每次 render 更新到 ref, 点下去总是最新的闭包
-  const act$ = useRef({ save, share, remove, full, changed, setLinking });
-  act$.current = { save, share, remove, full, changed, setLinking };
+  const act$ = useRef({ save, share, remove, full, changed, setLinking, expire });
+  act$.current = { save, share, remove, full, changed, setLinking, expire };
   const isSearch = !!searching;
   const columns = useMemo<Column<Node>[]>(() => [
     { key: 'name', header: '名称', sort: (n) => (n.kind === 'dir' ? '0' : '1') + n.name.toLowerCase(), render: (n) => {
@@ -315,6 +338,7 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
               {n.kind === 'dir' ? '' : `${fmtSize(n.size)} · `}{fmtTime(n.updatedAt)}
             </span>
           </span>
+          {n.expiresAt && <Expiry at={n.expiresAt} />}
           {isSearch && n.path && <span className="truncate font-mono text-xs text-muted-foreground">{parentOf(n.path)}</span>}
         </span>
       );
@@ -346,6 +370,7 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
               onOk: async (v) => { await fs.move(n.id, undefined, v.name.trim()); act$.current.changed(); },
             })}><Icon name="rename" /> 重命名</DropdownMenuItem>
             <DropdownMenuItem onSelect={() => setMoving([act$.current.full(n)])}><Icon name="move" /> 移动到…</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => act$.current.expire(n)}><Icon name="clock" /> 设置到期…</DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem variant="destructive" onSelect={() => void act$.current.remove([act$.current.full(n)])}><Icon name="trash" /> 删除</DropdownMenuItem>
           </DropdownMenuContent>
@@ -533,6 +558,7 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={() => rename(n)}><Icon name="rename" /> 重命名</DropdownMenuItem>
             <DropdownMenuItem onSelect={() => setMoving([full(n)])}><Icon name="move" /> 移动到…</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => expire(n)}><Icon name="clock" /> 设置到期…</DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem variant="destructive" onSelect={() => void remove([full(n)])}><Icon name="trash" /> 删除</DropdownMenuItem>
           </>

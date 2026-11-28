@@ -22,6 +22,8 @@ export interface ChunkRef { c: string; m: number; b: string; f: string; s: numbe
 /** 上传凭证 (签名后交给客户端)  */
 export interface Ticket {
   u: string; p: string; n: string; z: number; t: string; h: string | null; o: 0 | 1;
+  /** 到期时间 (毫秒, #22 TTL), 没设时省略 */
+  e?: number;
   id: string; k: number; c: string; x: number;
 }
 
@@ -46,6 +48,8 @@ export interface InitInput {
   mime?: string;
   sha256?: string;
   overwrite?: boolean;
+  /** 到期时间 (毫秒, #22 TTL) */
+  expiresAt?: number | null;
 }
 
 export type InitResult =
@@ -81,7 +85,7 @@ export async function initUpload(env: Env, p: Principal, inp: InitInput): Promis
   // 空文件: 所有空文件共用一个清单为空的 blob, 不发 TG
   if (inp.size === 0) {
     await env.DB.prepare("INSERT OR IGNORE INTO blobs (id, size, sha256, chunk_size, manifest, ref_count, created_at) VALUES ('empty', 0, NULL, 0, '[]', 0, ?)").bind(now()).run();
-    return { done: true, node: await linkNode(env, parent.id, inp.name, 0, mime, 'empty', existing) };
+    return { done: true, node: await linkNode(env, parent.id, inp.name, 0, mime, 'empty', existing, inp.expiresAt) };
   }
 
   // 秒传按上传者隔离 (哈希由客户端声明, 服务端不重算): 只认自己登记的 blob 和管理员登记的 blob,
@@ -89,7 +93,7 @@ export async function initUpload(env: Env, p: Principal, inp: InitInput): Promis
   if (sha) {
     const blob = await findDedup(env, p, sha, inp.size);
     if (blob) {
-      const node = await linkNode(env, parent.id, inp.name, inp.size, mime, blob, existing);
+      const node = await linkNode(env, parent.id, inp.name, inp.size, mime, blob, existing, inp.expiresAt);
       return { done: true, node };
     }
   }
@@ -101,6 +105,7 @@ export async function initUpload(env: Env, p: Principal, inp: InitInput): Promis
   const t: Ticket = {
     u: p.id, p: parent.id, n: inp.name, z: inp.size, t: mime, h: sha, o: inp.overwrite ? 1 : 0,
     id: blobId, k: chunkSize, c: pickChannel(channels, blobId), x: Math.floor(now() / 1000) + 24 * 3600,
+    ...(inp.expiresAt ? { e: inp.expiresAt } : {}),
   };
   return { done: false, ticket: await sealJson(env.SIGNING_KEY, TICKET, t), chunkSize, chunkCount: chunkCountOf(inp.size, chunkSize) };
 }
@@ -266,8 +271,8 @@ export async function commitUpload(env: Env, t: Ticket, receipts: string[], fold
   const id = newId();
   const ts = now();
   const nodeStmt = env.DB.prepare(
-    `INSERT INTO nodes (id, parent_id, name, kind, size, mime, blob_id, created_at, updated_at) VALUES (?, ?, ?, 'file', ?, ?, ?, ?, ?)`,
-).bind(id, t.p, t.n, t.z, t.t, t.id, ts, ts);
+    `INSERT INTO nodes (id, parent_id, name, kind, size, mime, blob_id, created_at, updated_at, expires_at) VALUES (?, ?, ?, 'file', ?, ?, ?, ?, ?, ?)`,
+).bind(id, t.p, t.n, t.z, t.t, t.id, ts, ts, t.e ?? null);
   const blobSql = 'INSERT INTO blobs (id, size, sha256, chunk_size, manifest, ref_count, created_at, owner) VALUES (?, ?, ?, ?, ?, 1, ?, ?)';
   const owner = t.h ? t.u : null;
   try {
@@ -279,20 +284,20 @@ export async function commitUpload(env: Env, t: Ticket, receipts: string[], fold
     if (!t.h || !/UNIQUE/i.test(String(e))) throw e;
     await env.DB.batch([env.DB.prepare(blobSql).bind(t.id, t.z, null, t.k, manifest, ts, null), ...partStmts, nodeStmt]);
   }
-  return { id, parent_id: t.p, name: t.n, kind: 'file', size: t.z, mime: t.t, blob_id: t.id, created_at: ts, updated_at: ts, deleted_at: null };
+  return { id, parent_id: t.p, name: t.n, kind: 'file', size: t.z, mime: t.t, blob_id: t.id, created_at: ts, updated_at: ts, deleted_at: null, expires_at: t.e ?? null };
 }
 
 /** 秒传或复制时: 新建节点并给 blob 加引用 */
-async function linkNode(env: Env, parentId: string, name: string, size: number, mime: string, blobId: string, existing: NodeRow | null): Promise<NodeRow> {
+async function linkNode(env: Env, parentId: string, name: string, size: number, mime: string, blobId: string, existing: NodeRow | null, expiresAt?: number | null): Promise<NodeRow> {
   if (existing) await trashNode(env, existing.id);
   const t = now();
   const id = newId();
   await env.DB.batch([
-    env.DB.prepare(`INSERT INTO nodes (id, parent_id, name, kind, size, mime, blob_id, created_at, updated_at) VALUES (?, ?, ?, 'file', ?, ?, ?, ?, ?)`)
-      .bind(id, parentId, name, size, mime, blobId, t, t),
+    env.DB.prepare(`INSERT INTO nodes (id, parent_id, name, kind, size, mime, blob_id, created_at, updated_at, expires_at) VALUES (?, ?, ?, 'file', ?, ?, ?, ?, ?, ?)`)
+      .bind(id, parentId, name, size, mime, blobId, t, t, expiresAt ?? null),
     env.DB.prepare('UPDATE blobs SET ref_count = ref_count + 1 WHERE id = ?').bind(blobId),
   ]);
-  return { id, parent_id: parentId, name, kind: 'file', size, mime, blob_id: blobId, created_at: t, updated_at: t, deleted_at: null };
+  return { id, parent_id: parentId, name, kind: 'file', size, mime, blob_id: blobId, created_at: t, updated_at: t, deleted_at: null, expires_at: expiresAt ?? null };
 }
 
 /**

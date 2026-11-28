@@ -71,6 +71,7 @@ export const TOOLS: Tool[] = [
         base64: { type: 'string', description: '二进制内容的 base64' },
         mime: { type: 'string', description: 'MIME 类型, 如 image/png' },
         overwrite: { type: 'boolean', description: '同名时覆盖, 默认 false (同名报错)' },
+        expiresIn: { type: 'integer', minimum: 60, description: '多少秒后自动删除 (临时文件用); 不传为永久' },
       },
       required: ['name'],
     },
@@ -81,7 +82,7 @@ export const TOOLS: Tool[] = [
       if (!data) return { status: 400, body: { error: 'text or base64 required' } };
       if (data.length > MCP_UPLOAD_MAX) return { status: 413, body: { error: `too large for MCP upload (max ${MCP_UPLOAD_MAX} bytes), use chunked REST upload` } };
       const mime = str(a.mime) ?? (typeof a.text === 'string' ? 'text/plain; charset=utf-8' : 'application/octet-stream');
-      return call('POST', `/upload?${q({ path: str(a.dir) ?? '/', name, overwrite: a.overwrite ? 1 : undefined })}`, undefined, { data, mime });
+      return call('POST', `/upload?${q({ path: str(a.dir) ?? '/', name, overwrite: a.overwrite ? 1 : undefined, expiresIn: num(a.expiresIn) })}`, undefined, { data, mime });
     },
   },
   {

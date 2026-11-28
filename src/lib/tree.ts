@@ -12,6 +12,8 @@ export interface NodeRow {
   created_at: number;
   updated_at: number;
   deleted_at: number | null;
+  /** 到期时间 (#22 TTL, 毫秒); 过了就返回 410, 维护时移进回收站 */
+  expires_at?: number | null;
 }
 
 /**
@@ -44,6 +46,9 @@ export async function getNodeWithAncestors(env: Env, id: string): Promise<NodeAc
     .all<NodeRow & { depth: number }>();
   const chain = r.results;
   if (!chain.length || chain.some((x) => x.deleted_at !== null) || chain[chain.length - 1].parent_id !== null) return null;
+  // 祖先目录已到期 (#22 TTL): 维护任务把它移进回收站之前, 里面的内容也按已删除处理
+  const t = Date.now();
+  if (chain.some((x, i) => i > 0 && x.expires_at && x.expires_at < t)) return null;
   const { depth: _d, ...node } = chain[0];
   return { node, ancestors: new Set(chain.map((x) => x.id)) };
 }
@@ -107,7 +112,7 @@ export async function listChildrenPage(env: Env, parentId: string, limit: number
   return { items, next: more ? items[items.length - 1].name : null };
 }
 
-const COLS = 'id, parent_id, name, kind, size, mime, blob_id, created_at, updated_at, deleted_at';
+const COLS = 'id, parent_id, name, kind, size, mime, blob_id, created_at, updated_at, deleted_at, expires_at';
 const nCols = COLS.split(', ').map((x) => 'n.' + x).join(', ');
 
 /** 整棵子树 (含自身, 未删除的), 一条递归 CTE 读完, 行读 ≈ 子树大小。最多返回 max 行 */
@@ -336,7 +341,7 @@ export async function restoreNode(env: Env, id: string, fallbackId = 'root'): Pr
   const parentId = parent && (fallbackId === 'root' || (await isWithin(env, parent.id, fallbackId))) ? parent.id : fallbackId;
   let name = node.name;
   if (await childByName(env, parentId, name)) name = `${name} (restored ${new Date().toISOString().slice(0, 19)})`;
-  await env.DB.prepare('UPDATE nodes SET parent_id = ?, name = ?, deleted_at = NULL WHERE id = ?').bind(parentId, name, id).run();
+  await env.DB.prepare('UPDATE nodes SET parent_id = ?, name = ?, deleted_at = NULL, expires_at = NULL WHERE id = ?').bind(parentId, name, id).run();
   forgetNode(id);
 }
 
@@ -352,5 +357,7 @@ export function publicNode(n: NodeRow) {
     updatedAt: n.updated_at,
     /** 内容版本 (= ETag, 内容寻址)。读内容时带 ?v= 且仍是当前版本, 响应可以被浏览器长期缓存 (#23) */
     version: n.blob_id,
+    /** 到期时间 (毫秒, #22); 没设为 null */
+    expiresAt: n.expires_at ?? null,
   };
 }

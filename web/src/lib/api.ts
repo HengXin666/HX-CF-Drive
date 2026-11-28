@@ -14,6 +14,8 @@ export interface Node {
   deletedAt?: number;
   /** 内容版本 (= ETag)。读内容时带 ?v= 可被浏览器长期缓存 */
   version?: string | null;
+  /** 到期时间 (毫秒, #22 TTL); 过了访问返回 410 */
+  expiresAt?: number | null;
 }
 
 const KEY = 'hxd_token';
@@ -68,6 +70,8 @@ export const fs = {
   /** 批量操作 (#22): 一个请求, 服务端一个 D1 batch; 校验不过的项在 failed 里 */
   batch: (b: { op: 'move' | 'copy' | 'delete' | 'restore' | 'rename'; ids?: string[]; items?: { id: string; name: string }[]; toPath?: string; overwrite?: boolean }) =>
     api<{ ok: number; failed: { id: string; error: string }[]; nodes?: Node[] }>('POST', '/fs/batch', b),
+  /** 设置 / 取消到期时间 (#22): expiresIn 秒, null 取消 */
+  expire: (id: string, expiresIn: number | null) => api<{ node: Node }>('POST', '/fs/expire', { id, expiresIn }),
   /** 批量签直链 (每次最多 200 个), 不是文件或无权访问的 id 进 missing */
   links: (ids: string[], expiresIn = 0) => api<{ items: { id: string; name: string; mime: string | null; url: string }[]; missing: string[] }>('POST', '/fs/links', { ids, expiresIn }),
 };

@@ -10,7 +10,7 @@ export class HttpError extends Error {
 export const ROOT = 'root';
 
 export function publicNode(n: DNode) {
-  return { id: n.id, name: n.name, kind: n.kind, size: n.size, mime: n.mime, parentId: n.parentId, createdAt: n.createdAt, updatedAt: n.updatedAt };
+  return { id: n.id, name: n.name, kind: n.kind, size: n.size, mime: n.mime, parentId: n.parentId, createdAt: n.createdAt, updatedAt: n.updatedAt, expiresAt: n.expiresAt ?? null };
 }
 
 export function getNode(id: string): DNode | null {
@@ -139,6 +139,7 @@ export function restore(id: string) {
   if (!n || n.deletedAt === null) throw new HttpError(404, 'not in trash');
   const t = n.deletedAt;
   for (const x of subtree(id)) if (x.deletedAt === t) x.deletedAt = null;
+  n.expiresAt = null;
   // 父目录已不在时恢复到根目录; 同名时自动加后缀
   if (!getNode(n.parentId ?? '')) n.parentId = ROOT;
   const base = n.name;
@@ -165,6 +166,8 @@ export async function maintenance(keepMs = 7 * 86400_000): Promise<Record<string
   const s = state();
   const out = { seeded: 0, revived: 0, nodes: 0, blobs: 0, tgDeletes: 0 };
   const cut = now() - keepMs;
+  // 到期的节点 (#22 TTL) 先进回收站
+  for (const n of Object.values(s.nodes)) if (n.expiresAt && n.expiresAt < now() && n.deletedAt === null && getNode(n.id)) trash(n.id);
   for (const n of Object.values(s.nodes)) {
     if (n.deletedAt !== null && n.deletedAt < cut) {
       if (n.blobId && s.blobs[n.blobId]) s.blobs[n.blobId].refs--;

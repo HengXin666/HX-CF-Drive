@@ -10,6 +10,8 @@ export interface DNode {
   createdAt: number;
   updatedAt: number;
   deletedAt: number | null;
+  /** 到期时间 (#22 TTL) */
+  expiresAt?: number | null;
 }
 // 数据块以内容 sha256 为 id, 相同内容只存一份 (秒传就靠它)。virtual 表示只有元数据的占位
 export interface DBlob { id: string; size: number; refs: number; virtual?: boolean }
@@ -17,7 +19,7 @@ export interface DShare { id: string; nodeId: string; password: string | null; e
 export interface DBot { id: string; username: string | null; status: string; last_error: string | null }
 export interface DChannel { id: string; title: string; status: string }
 export interface DToken { id: string; name: string; scopes: string; root_id: string; expires_at: number | null; created_at: number; token: string }
-export interface DTicket { ticket: string; parentId: string; name: string; size: number; mime: string | null; overwrite: boolean; chunkSize: number; chunkCount: number }
+export interface DTicket { ticket: string; parentId: string; name: string; size: number; mime: string | null; overwrite: boolean; chunkSize: number; chunkCount: number; expiresAt?: number | null }
 
 export interface Meta {
   v: 1;
