@@ -1,11 +1,19 @@
 // 复制链接弹窗 (#22): 一个或一批文件的永久直链, 可选 URL / Markdown / HTML / BBCode, 一键复制全部
 import { useEffect, useState } from 'react';
 import { fs, type Node } from '../lib/api';
-import { FORMATS, formatLinks, lastFormat, type LinkFormat, type LinkItem, rememberFormat } from '../lib/linkfmt';
+import { FORMATS, formatLinks, type LinkFormat, type LinkItem } from '../lib/linkfmt';
 import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Textarea, toast, ToggleGroup, ToggleGroupItem } from '../ui';
 import { Icon } from './Icon';
 
 const BATCH = 200;
+
+const KEY = 'hxd_linkfmt';
+const lastFormat = (): LinkFormat => {
+  const v = localStorage.getItem(KEY);
+  return FORMATS.some((x) => x.id === v) ? (v as LinkFormat) : 'url';
+};
+const rememberFormat = (f: LinkFormat) => localStorage.setItem(KEY, f);
+
 
 export function LinkDialog({ nodes, onClose }: { nodes: Node[] | null; onClose: () => void }) {
   const [fmt, setFmt] = useState<LinkFormat>(lastFormat);

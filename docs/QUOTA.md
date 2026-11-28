@@ -122,6 +122,11 @@ D1 读行几乎全部来自搜索的最坏情况。不搜索或搜索大多命�
 
 | 操作 | D1 查询 | 行读 | 行写 | TG 调用 | 说明 |
 | --- | --- | --- | --- | --- | --- |
+| `POST /fs/batch` move 4 项 | 5 | 61 | 4 | 0 | 读节点 + 祖先链 + 目标 + 同名检查各 1 条, 写入 1 条 `UPDATE ... json_each` |
+| `POST /fs/batch` copy 2 项 | 8 | 54 | 8 | 0 | 每个目录多 1 条读子树; 一次最多 30 个目录 (免费计划每次调用 50 条查询) |
+| `POST /fs/batch` rename 3 项 | 4 | 41 | 4 | 0 | 一条 `UPDATE ... FROM json_each` |
+| `POST /fs/batch` delete 3 项 | 3 | 46 | 6 | 0 | 原来前端逐项 `/fs/delete`, 每项 2 条查询 |
+| `POST /fs/batch` restore 3 项 | 4 | 48 | 6 | 0 | 原位置同名时加 `(restored 时间)` 后缀, 和单个恢复一致 |
 | `POST /fs/links` (批量直链) | 2 | ≈ 文件数 + 祖先目录数 | 0 | 0 | 一条 `IN` + 一条 `pathsOf`; 替代每个文件一次 `/fs/link` |
 
 ## 8. 本地验证情况

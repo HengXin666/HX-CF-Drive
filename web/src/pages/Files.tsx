@@ -22,6 +22,7 @@ import {
 const MoveDialog = lazy(() => import('../components/MoveDialog').then((m) => ({ default: m.MoveDialog })));
 const LinkDialog = lazy(() => import('../components/LinkDialog').then((m) => ({ default: m.LinkDialog })));
 const UploadSettings = lazy(() => import('../components/UploadSettings').then((m) => ({ default: m.UploadSettings })));
+const RenameDialog = lazy(() => import('../components/RenameDialog').then((m) => ({ default: m.RenameDialog })));
 const Preview = lazy(() => import('../components/Preview').then((m) => ({ default: m.Preview })));
 
 const parentOf = (p: string) => p.replace(/\/[^/]+\/?$/, '') || '/';
@@ -39,6 +40,10 @@ function tokensAt(tokens: TokenRow[], p: string) {
   const scoped = tokens.filter((t) => t.root_path && t.root_path !== '/');
   return { inside: scoped.filter((t) => within(p, t.root_path) && p !== t.root_path), holds: scoped.filter((t) => within(t.root_path, p)) };
 }
+const ERR: Record<string, string> = { 'target exists': '目标已有同名项', 'already there': '已经在这个目录里', 'not found': '不存在', 'outside token root': '不在令牌目录里' };
+/** 批量接口的 failed 换成可读的一段话 */
+const batchErr = (items: Node[], failed: { id: string; error: string }[]) => failed.slice(0, 5)
+  .map((f) => `${items.find((n) => n.id === f.id)?.name ?? f.id}: ${ERR[f.error] ?? f.error}`).join('\n') + (failed.length > 5 ? `\n等 ${failed.length} 项` : '');
 const names = (ts: TokenRow[]) => [...new Set(ts.map((t) => `${t.name} (${t.root_path})`))].join(', ');
 
 async function copy(text: string, what: string) {
@@ -80,13 +85,19 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
   const [searchedQ, setSearchedQ] = useState('');
   const [prompt, setPrompt] = useState<PromptRequest | null>(null);
   const [moving, setMoving] = useState<Item[] | null>(null);
+  const [copying, setCopying] = useState<Item[] | null>(null);
+  const [renaming, setRenaming] = useState<Node[] | null>(null);
+  /** 批量复制 / 重命名成功后清掉多选 */
+  const clearSel = useRef<(() => void) | null>(null);
   const [preview, setPreview] = useState<PreviewTarget | null>(null);
   const [linking, setLinking] = useState<Node[] | null>(null);
   const [settings, setSettings] = useState(false);
   // 弹窗用过一次才挂载 (懒加载的代码到那时才下载)
-  const used = useRef({ move: false, preview: false, link: false, settings: false }).current;
+  const used = useRef({ move: false, preview: false, link: false, settings: false, copy: false, rename: false }).current;
   if (linking) used.link = true;
   if (settings) used.settings = true;
+  if (copying) used.copy = true;
+  if (renaming) used.rename = true;
   if (moving) used.move = true;
   if (preview) used.preview = true;
   const [drag, setDrag] = useState(false);
@@ -251,7 +262,11 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
       confirmText: dirs.length ? (one ? one.name : '删除') : undefined,
     });
     if (!ok) return;
-    await act(async () => { for (const n of items) await fs.remove(n.id); }, items.length > 1 ? `已把 ${items.length} 项移入回收站` : '已移入回收站');
+    // 一个请求批量删除 (#22, 服务端一个 D1 batch), 不再逐项调用
+    await act(async () => {
+      const r = await fs.batch({ op: 'delete', ids: items.map((n) => n.id) });
+      if (r.failed.length) throw new Error(batchErr(items, r.failed));
+    }, items.length > 1 ? `已把 ${items.length} 项移入回收站` : '已移入回收站');
     clear?.();
   };
 
@@ -263,13 +278,17 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
       confirmLabel: '仍然移动',
       danger: true,
     }))) return;
-    const failed: string[] = [];
-    for (const n of items) {
-      try { await fs.move(n.id, to, n.name); } catch (e) { failed.push(`${n.name}: ${(e as Error).message}`); }
-    }
+    const r = await fs.batch({ op: 'move', ids: items.map((n) => n.id), toPath: to });
     changed();
-    if (failed.length) throw new Error(failed.join('\n'));
+    if (r.failed.length) throw new Error(batchErr(items, r.failed));
     toast.success(items.length > 1 ? `已移动 ${items.length} 项到 ${to}` : `已移动到 ${to}`);
+  };
+  const copyTo = async (items: Item[], to: string) => {
+    const r = await fs.batch({ op: 'copy', ids: items.map((n) => n.id), toPath: to });
+    changed();
+    if (r.failed.length) throw new Error(batchErr(items, r.failed));
+    clearSel.current?.();
+    toast.success(`已复制 ${r.ok} 项到 ${to}`);
   };
 
   // 列定义 memo 化 (#23): 只在图片开关或搜索状态变化时重建, 表格 (TanStack 列定义) 不再每次 render 都重算;
@@ -403,6 +422,8 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
       {sel.some((n) => n.kind === 'file') && (
         <Button size="sm" variant="outline" aria-label="复制链接" onClick={() => setLinking(sel)}><Icon name="link" /><span className="hidden sm:inline">复制链接</span></Button>
       )}
+      <Button size="sm" variant="outline" aria-label="复制到" onClick={() => { clearSel.current = clear; setCopying(sel.map(full)); }}><Icon name="copy" /><span className="hidden sm:inline">复制到…</span></Button>
+      <Button size="sm" variant="outline" aria-label="批量重命名" onClick={() => { clearSel.current = clear; setRenaming(sel); }}><Icon name="rename" /><span className="hidden sm:inline">重命名</span></Button>
       <Button size="sm" variant="outline" aria-label="移动到" onClick={() => setMoving(sel.map(full))}><Icon name="move" /><span className="hidden sm:inline">移动到…</span></Button>
       <Button size="sm" variant="destructive" aria-label="删除" onClick={() => void remove(sel.map(full), clear)}><Icon name="trash" /><span className="hidden sm:inline">删除</span></Button>
     </>
@@ -511,6 +532,11 @@ export function Files({ path, go, isAdmin }: { path: string; go: (p: string) => 
             onMove={(to) => moveTo(moving ?? [], to)}
           />
         )}
+        {used.copy && (
+          <MoveDialog copy nodes={copying} from={copying?.length ? parentOf(copying[0].fullPath) : path}
+            onClose={() => setCopying(null)} onMove={(to) => copyTo(copying ?? [], to)} />
+        )}
+        {used.rename && <RenameDialog nodes={renaming} onClose={() => setRenaming(null)} onDone={() => { clearSel.current?.(); changed(); }} />}
         {used.settings && <UploadSettings open={settings} onClose={() => setSettings(false)} />}
         {used.link && <LinkDialog nodes={linking} onClose={() => setLinking(null)} />}
         {used.preview && <Preview target={preview} onClose={() => setPreview(null)} onDownload={(n) => void save(n)} />}

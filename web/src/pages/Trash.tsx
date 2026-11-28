@@ -32,6 +32,19 @@ export function Trash() {
     }
   };
 
+  /** 批量恢复 (#22): 一个请求, 服务端一个 D1 batch */
+  const restoreMany = async (items: Node[], clear: () => void) => {
+    try {
+      const r = await fs.batch({ op: 'restore', ids: items.map((n) => n.id) });
+      if (r.failed.length) toast.error(`${r.failed.length} 项没能恢复: ${r.failed[0].error}`);
+      else toast.success(`已恢复 ${r.ok} 项`);
+      clear();
+      await load();
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  };
+
   const done = (r: PurgeResult, what: string) => {
     toast.success(r.more ? `${what}; 还有 ${r.leftNodes + r.leftBlobs} 项积压, 由定时维护接着清理` : what);
   };
@@ -83,7 +96,10 @@ export function Trash() {
       meta={<><Meta icon="fileText">{rows.length} 项</Meta><Meta icon="restore">保留 7 天</Meta></>}
       right={<Button size="sm" variant="outline" disabled={!rows.length} onClick={() => void empty()}><Icon name="trash" /><span className="hidden sm:inline">清空</span></Button>}
     >
-      <DataTable columns={columns} rows={rows} rowKey={(n) => n.id} loading={loading} emptyText="回收站是空的" emptyIcon="trash" />
+      <DataTable columns={columns} rows={rows} rowKey={(n) => n.id} loading={loading} emptyText="回收站是空的" emptyIcon="trash" selectable
+        bulkActions={(sel, clear) => (
+          <Button size="sm" variant="outline" aria-label="恢复所选" onClick={() => void restoreMany(sel, clear)}><Icon name="restore" /><span className="hidden sm:inline">恢复</span></Button>
+        )} />
     </Page>
   );
 }

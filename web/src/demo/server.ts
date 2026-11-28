@@ -60,6 +60,38 @@ on('POST', '/fs/delete', 'write', async (c) => {
   return json(200, { trashed: trash(locate(b.id, b.path).id) });
 });
 
+// 批量操作 (#22), 同 /fs/batch: 逐项执行, 失败的项进 failed
+on('POST', '/fs/batch', 'write', async (c) => {
+  const b = await c.body();
+  const op = String(b.op ?? '');
+  if (!['move', 'copy', 'delete', 'restore', 'rename'].includes(op)) throw new HttpError(400, 'bad op');
+  const items = op === 'rename'
+    ? (Array.isArray(b.items) ? b.items : []).map((x) => ({ id: String((x as { id: string }).id), name: String((x as { name: string }).name ?? '').trim() }))
+    : (Array.isArray(b.ids) ? b.ids : []).map((id) => ({ id: String(id), name: '' }));
+  if (items.length > 500) throw new HttpError(413, 'too many items (max 500)');
+  const to = op === 'move' || op === 'copy' ? locate(b.toParentId, b.toPath ?? '/') : null;
+  const failed: { id: string; error: string }[] = [];
+  const nodes = [];
+  let ok = 0;
+  for (const it of items) {
+    try {
+      if (op === 'restore') restore(it.id);
+      else {
+        const n = getNode(it.id);
+        if (!n || n.id === ROOT) throw new HttpError(404, 'not found');
+        if (op === 'delete') trash(n.id);
+        else if (op === 'rename') move(n.id, n.parentId ?? ROOT, it.name, false);
+        else if (op === 'move') nodes.push(publicNode(move(n.id, to!.id, n.name, !!b.overwrite)));
+        else nodes.push(publicNode(copy(n, to!.id, n.name)));
+      }
+      ok++;
+    } catch (e) {
+      failed.push({ id: it.id, error: (e as Error).message });
+    }
+  }
+  return json(200, { ok, failed, ...(to ? { nodes } : {}) });
+});
+
 on('GET', '/fs/trash', 'write', () => json(200, { items: trashList() }));
 
 on('POST', '/fs/restore', 'write', async (c) => {

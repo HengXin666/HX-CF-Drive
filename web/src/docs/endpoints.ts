@@ -21,6 +21,7 @@ export const GROUPS: Group[] = [
       { method: 'POST', path: '/api/v1/fs/mkdir', scope: 'write', desc: '逐级创建目录', body: '{"path":"/photos/2026"}' },
       { method: 'POST', path: '/api/v1/fs/move', scope: 'write', desc: '移动或重命名', body: '{"path":"/a.png","toPath":"/photos","name":"b.png","overwrite":false}' },
       { method: 'POST', path: '/api/v1/fs/copy', scope: 'write', desc: '复制 (只复制元数据, 不重传数据)', body: '{"path":"/a.png","toPath":"/backup"}' },
+      { method: 'POST', path: '/api/v1/fs/batch', scope: 'write', desc: '批量操作 (≤ 500 项): op = move / copy / delete / restore / rename。move/copy 用 toPath 或 toParentId 指定目标; rename 用 items。固定 3~5 条查询 + 一个 D1 batch (事务), 和项数无关; 校验不过的项 (不存在, 越权, 同名, 移进自身) 放进 failed, 其余照常执行', body: '{"op":"move","ids":["<id1>","<id2>"],"toPath":"/backup","overwrite":false}', resp: '{"ok":2,"failed":[{"id":"...","error":"target exists"}],"nodes":[Node]}' },
       { method: 'POST', path: '/api/v1/fs/delete', scope: 'write', desc: '移入回收站 (目录只标记顶层)', body: '{"path":"/old"}' },
       { method: 'GET', path: '/api/v1/fs/trash', scope: 'write', desc: '回收站列表 (受限令牌只看自己根下的)', resp: '{"items":[Node & {deletedAt}]}' },
       { method: 'POST', path: '/api/v1/fs/restore', scope: 'write', desc: '恢复 (同名时自动加后缀)', body: '{"id":"<nodeId>"}' },

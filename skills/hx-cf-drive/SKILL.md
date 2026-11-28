@@ -47,6 +47,7 @@ node scripts/hxd.mjs share /a.zip [密码] [天数]
 | 删除 | `POST /api/v1/fs/delete {"path":"/x"}` (进回收站, 可 restore) |
 | 搜索 | `GET /api/v1/fs/search?q=kw` (扫整个令牌子树, 每令牌每分钟 6 次; 已知目录时优先 list 后本地过滤) |
 | 直链 | `POST /api/v1/fs/link {"path":"/x","expiresIn":0}` → `{"url"}` |
+| 批量操作 | `POST /api/v1/fs/batch {"op":"move|copy|delete|restore|rename","ids":[...],"toPath":"/x"}`; rename 用 `"items":[{"id","name"}]` → `{"ok","failed":[{id,error}]}` (≤ 500 项) |
 | 批量直链 | `POST /api/v1/fs/links {"ids":[...],"expiresIn":0}` → `{"items":[{id,name,mime,url}],"missing":[]}` (≤ 200 个) |
 | 分片清单 | `GET /api/v1/fs/manifest?id=<id>` → `{"size","chunkSize","chunks":[{"bot","fileId","size"}]}` |
 | 读内容 | `GET /api/v1/files/<id>/content` (支持 Range); 带 `?v=<version>` 且等于当前版本时回 `immutable`, 可长期缓存 |

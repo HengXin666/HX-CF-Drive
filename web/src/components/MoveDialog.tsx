@@ -7,7 +7,9 @@ import { FolderTree } from './FolderTree';
 
 const within = (p: string, dir: string) => dir === '/' || p === dir || p.startsWith(dir + '/');
 
-export function MoveDialog({ nodes, from, onClose, onMove }: {
+export function MoveDialog({ nodes, from, onClose, onMove, copy = false }: {
+  /** 复制模式 (#22 批量复制): 标题和按钮写 "复制", 允许选当前目录以外的任何目录 */
+  copy?: boolean;
   /** 要移动的项目; 为空时不显示 */
   nodes: (Node & { fullPath: string })[] | null;
   /** 它们现在所在的目录 */
@@ -39,13 +41,13 @@ export function MoveDialog({ nodes, from, onClose, onMove }: {
     <Dialog open={!!nodes} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>移动 {label}</DialogTitle>
+          <DialogTitle>{copy ? '复制' : '移动'} {label}</DialogTitle>
           <DialogDescription>选择目标目录, 双击或点箭头展开。</DialogDescription>
         </DialogHeader>
         <div className="max-h-80 overflow-y-auto rounded-lg border bg-background/50 p-1.5">
           <FolderTree value={to} onChange={setTo} disabled={(p) => dirs.some((d) => within(p, d))} menu={(p, t) => (
             <>
-              <DropdownMenuItem disabled={t.disabled || p === from} onSelect={() => { setTo(p); void submit(p); }}><Icon name="move" /> 移到这里</DropdownMenuItem>
+              <DropdownMenuItem disabled={t.disabled || p === from} onSelect={() => { setTo(p); void submit(p); }}><Icon name={copy ? 'copy' : 'move'} /> {copy ? '复制到这里' : '移到这里'}</DropdownMenuItem>
               <DropdownMenuItem disabled={t.disabled} onSelect={() => setTo(p)}><Icon name="check" /> 选为目标</DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onSelect={t.toggle}><Icon name={t.open ? 'folder' : 'tree'} /> {t.open ? '折叠' : '展开'}</DropdownMenuItem>
@@ -58,7 +60,7 @@ export function MoveDialog({ nodes, from, onClose, onMove }: {
         {err && <p className="text-sm text-destructive">{err}</p>}
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>取消</Button>
-          <Button loading={busy} disabled={to === from} onClick={() => void submit()}>移动到这里</Button>
+          <Button loading={busy} disabled={to === from} onClick={() => void submit()}>{copy ? '复制到这里' : '移动到这里'}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -23,10 +23,3 @@ export function formatLink(it: LinkItem, f: LinkFormat): string {
 }
 
 export const formatLinks = (items: LinkItem[], f: LinkFormat) => items.map((it) => formatLink(it, f)).join('\n');
-
-const KEY = 'hxd_linkfmt';
-export const lastFormat = (): LinkFormat => {
-  const v = localStorage.getItem(KEY);
-  return FORMATS.some((x) => x.id === v) ? (v as LinkFormat) : 'url';
-};
-export const rememberFormat = (f: LinkFormat) => localStorage.setItem(KEY, f);

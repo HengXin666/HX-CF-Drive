@@ -14,6 +14,7 @@ import { runMaintenance } from '../services/maintenance';
 import { cachedStats, invalidateStats, liveUsage, putStats, STAT_KEYS, usageFromCounters } from '../services/stats';
 import { ensureParts, IMMUTABLE, loadBlob, serveNode } from '../services/serve';
 import { commitUpload, foldReceipts, initUpload, openTicket, openTicketBare, putChunk, uploadStream } from '../services/upload';
+import { type BatchReq, runBatch } from '../services/batch';
 import { trash } from './trash';
 
 export const api = new Hono<AppEnv>();
@@ -110,8 +111,21 @@ const COPY_ROWS_PER_STMT = 200;
  * batch 是事务, 中途失败整体回滚, 不会留下半棵树。
  */
 export async function copyTree(env: Env, src: NodeRow, parentId: string, name: string): Promise<NodeRow> {
-  const rows = src.kind === 'dir' ? await subtree(env, src.id, COPY_MAX + 1) : [src];
-  if (rows.length > COPY_MAX) throw new HttpError(413, `copy too large (max ${COPY_MAX} nodes)`);
+  const plan = await copyPlan(env, src, parentId, name, COPY_MAX);
+  try {
+    await env.DB.batch(plan.stmts);
+  } catch (e) {
+    // 只有顶层可能重名 (子项都挂在新 id 下)
+    if (/UNIQUE/i.test(String(e))) throw new HttpError(409, 'target exists');
+    throw e;
+  }
+  return plan.node;
+}
+
+/** 复制的写入语句 (不执行), 批量复制 (#22) 把多棵子树的语句放进同一个 batch。max 为这次还能复制的节点数 */
+export async function copyPlan(env: Env, src: NodeRow, parentId: string, name: string, max: number): Promise<{ stmts: D1PreparedStatement[]; node: NodeRow; count: number }> {
+  const rows = src.kind === 'dir' ? await subtree(env, src.id, max + 1) : [src];
+  if (rows.length > max) throw new HttpError(413, `copy too large (max ${COPY_MAX} nodes)`);
   const t = now();
   const ids = new Map<string, string>();
   for (const n of rows) ids.set(n.id, newId());
@@ -137,15 +151,20 @@ export async function copyTree(env: Env, src: NodeRow, parentId: string, name: s
        WHERE blobs.id = j.id`,
     ).bind(JSON.stringify([...refs])));
   }
-  try {
-    await env.DB.batch(stmts);
-  } catch (e) {
-    // 只有顶层可能重名 (子项都挂在新 id 下)
-    if (/UNIQUE/i.test(String(e))) throw new HttpError(409, 'target exists');
-    throw e;
-  }
-  return { ...src, id: ids.get(src.id)!, parent_id: parentId, name, created_at: t, updated_at: t, deleted_at: null };
+  return { stmts, count: rows.length, node: { ...src, id: ids.get(src.id)!, parent_id: parentId, name, created_at: t, updated_at: t, deleted_at: null } };
 }
+
+/**
+ * 批量操作 (#22): { op: move|copy|delete|restore|rename, ids | items, toParentId | toPath, overwrite }
+ * 固定 3~4 条查询 + 1 次 batch (事务), 和项数无关; 校验不过的项进 failed, 其余照常执行。见 services/batch.ts
+ */
+api.post('/fs/batch', requireScope('write'), async (c) => {
+  const b = await c.req.json<BatchReq & { toPath?: string }>();
+  if (!['move', 'copy', 'delete', 'restore', 'rename'].includes(b.op)) throw new HttpError(400, 'bad op');
+  if ((b.op === 'move' || b.op === 'copy') && !b.toParentId) b.toParentId = (await locate(c, null, b.toPath ?? '/')).id;
+  const r = await runBatch(c.env, c.get('principal'), b);
+  return c.json({ ok: r.ok, failed: r.failed, ...(r.nodes ? { nodes: r.nodes.map(publicNode) } : {}) });
+});
 
 api.post('/fs/delete', requireScope('write'), async (c) => {
   const b = await c.req.json<{ id?: string; path?: string }>();
