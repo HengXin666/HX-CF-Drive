@@ -8,6 +8,7 @@ import { num } from '../env';
 import { allBots, type BotRow, DELETE_BATCH, deleteMessages, markDead, TgFatal, TgRateLimit } from '../drivers/tg';
 import { now } from '../lib/util';
 import { forgetBlob, parseManifest } from './serve';
+import { ROWID_LOW } from './sweep';
 import type { ChunkRef } from './upload';
 
 export interface PurgeStats { nodes: number; blobs: number; tgDeletes: number; tgCalls: number; tgExpired: number; tgFailed: number }
@@ -152,11 +153,19 @@ export async function purgeBlobs(env: Env, tgBudget: number, out: PurgeStats): P
       stmts.push(env.DB.prepare('DELETE FROM blobs WHERE id IN (SELECT value FROM json_each(?)) AND NOT EXISTS (SELECT 1 FROM blob_parts p WHERE p.blob_id = blobs.id)')
         .bind(JSON.stringify(parted)));
     }
+    const partedAt = parted.length ? stmts.length - 1 : -1;
+    // 删过 blob 行: 记下删后的 MAX(rowid) (只在变小时写 1 行), 孤儿清扫据此处理 rowid 复用 (见 sweep.ts)
+    if (stmts.length) {
+      stmts.push(env.DB.prepare(
+        `INSERT INTO counters (name, n) SELECT '${ROWID_LOW}', COALESCE(MAX(rowid), 0) FROM blobs WHERE 1
+         ON CONFLICT(name) DO UPDATE SET n = excluded.n WHERE excluded.n < counters.n`,
+      ));
+    }
     let deleted = 0;
     if (stmts.length) {
       const res = await env.DB.batch(stmts);
       for (let i = 0; i < whole.length; i++) if (whole[i].part === null) deleted += res[i].meta.changes ?? 0;
-      if (parted.length) deleted += res[res.length - 1].meta.changes ?? 0;
+      if (partedAt >= 0) deleted += res[partedAt].meta.changes ?? 0;
     }
     for (const id of new Set(units.map((u) => u.blob))) forgetBlob(id);
     out.blobs += deleted;
