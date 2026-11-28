@@ -52,6 +52,7 @@ curl -X POST -H "Authorization: Bearer $ADMIN" -H "Content-Type: application/jso
 | POST/GET/DELETE | `/api/v1/shares` | 分享链接 (创建时可带 `remark`) |
 | PATCH | `/api/v1/shares/:id` `{password, expiresIn, disabled, remark, maxDownloads, resetDownloads}` | 编辑分享, 只改传了的字段; `password: null` 去掉密码, `expiresIn: null` 永久, 停用后访问返回 410; `maxDownloads` 下载次数上限 (创建时也能带, `null` 不限也不计数), 用完返回 410, `resetDownloads: true` 清零 |
 | GET | `/f/:id/:name?e=&s=` | 签名直链 (公开) |
+| GET | `/random?dir=&orientation=auto\|landscape\|portrait&type=img\|url` | 随机图 (公开, **默认关闭**): 设了 `RANDOM_DIR` (如 `/random`) 才开放, 只取该目录子树里的图片; `dir` 是其下的子目录。方向按子目录约定: `landscape` / `portrait` (或 `横屏` / `竖屏`), `auto` 按 UA (手机取竖屏), 对应子目录没有图时退回全部。`type=img` 302 到 1 小时有效的直链, `type=url` 返回 `{url, name, orientation}` |
 | GET | `/s/:id?path=子路径` | 分享 (公开); 有密码时用 `X-Share-Password` 头 (也接受 `?p=`, 但会进日志和历史), 连错 10 次锁 15 分钟。浏览器打开 (`Accept: text/html`) 时返回页面 (v0.4): 密码输入, 文件夹列表, 下载按钮; `?download=1` 下载, `?raw=1` 照旧返回 JSON / 文件本身。页面里的密码表单 `POST /s/:id` (表单字段 `p`, `path`), 输对后发一个只对该分享有效 1 天的 HttpOnly Cookie, 之后的链接不带密码 |
 | * | `/api/v1/admin/*` | 管理: stats, bots, channels, tokens, maintenance |
 

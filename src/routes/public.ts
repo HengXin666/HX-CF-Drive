@@ -1,8 +1,9 @@
 /** 无需令牌的公开访问: 签名直链 /f/:id 和分享链接 /s/:id */
 import { Hono, type Context } from 'hono';
 import { getCookie } from 'hono/cookie';
-import type { AppEnv, Env } from '../env';
-import { verifyLink } from '../lib/sign';
+import { type AppEnv, type Env, publicOrigin } from '../env';
+import { signLink, verifyLink } from '../lib/sign';
+import { randomImage } from '../services/random';
 import { tokenAlive } from '../lib/auth';
 import { getNodeCached, listChildren, type NodeRow, publicNode, resolvePath } from '../lib/tree';
 import { HttpError, sha256Hex } from '../lib/util';
@@ -10,6 +11,12 @@ import { serveNode } from '../services/serve';
 import { dirPage, errorPage, filePage, passwordPage, wantsHtml } from './sharePage';
 
 export const pub = new Hono<AppEnv>();
+
+// 随机图 (#22): 只在设置了 RANDOM_DIR 时开放, 只取该目录子树的图片; 跳到 1 小时有效的签名直链
+pub.get('/random', (c) => randomImage(c, async (n) => {
+  const exp = Math.floor(Date.now() / 1000) + 3600;
+  return `${publicOrigin(c.env, c.req.url)}/f/${n.id}/${encodeURIComponent(n.name)}?${await signLink(c.env.SIGNING_KEY, n.id, exp, 'admin')}&v=${encodeURIComponent(n.blob_id ?? '')}`;
+}));
 
 async function cachedNode(env: Env, id: string): Promise<NodeRow> {
   const n = await getNodeCached(env, id);

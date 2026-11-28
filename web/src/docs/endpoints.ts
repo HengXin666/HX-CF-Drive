@@ -52,6 +52,14 @@ export const GROUPS: Group[] = [
     ],
   },
   {
+    id: 'random', title: '随机图',
+    note: '默认关闭: 在 wrangler.toml 或 Dashboard 设 RANDOM_DIR (如 /random) 后开放, 只取该目录子树的图片。方向按 landscape / portrait (或 横屏 / 竖屏) 子目录区分。图片清单在 isolate 内存缓存 5 分钟。',
+    items: [
+      { method: 'GET', path: '/random?dir=&orientation=auto&type=img', scope: 'public', desc: '随机一张图: type=img 302 到 1 小时有效的签名直链 (可直接放进 <img>), type=url 返回 JSON; orientation=auto 按 UA 判断, 手机取竖屏', resp: '302 Location: /f/<id>/a.jpg?... 或 {"url":"...","name":"a.jpg","orientation":"landscape"}',
+        curl: 'curl -s "$BASE/random?type=url&orientation=portrait"' },
+    ],
+  },
+  {
     id: 'share', title: '分享',
     items: [
       { method: 'POST', path: '/api/v1/shares', scope: 'read', desc: '创建分享, 密码, 有效期, 备注可选', body: '{"path":"/a.zip","password":"1234","expiresIn":604800,"remark":"给小明"}', resp: '{"id":"...","url":"https://.../s/<id>"}' },

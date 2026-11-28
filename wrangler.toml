@@ -42,6 +42,8 @@ ORPHAN_SWEEP = "1"
 # WebDAV 向客户端报告的总容量 (GB, RFC 4331 quota-available-bytes = 总容量 - 已用)。不设时报 1 PiB (TG 不限容量)
 # DAV_QUOTA_GB = "1024"
 # PUBLIC_URL = "https://drive.example.com"
+# 随机图 API (/random) 的图片目录, 只取这个目录子树里的图片; 不设则关闭
+# RANDOM_DIR = "/random"
 
 # 机密信息用 `wrangler secret put` 设置, 不要写在这里:
 #   ADMIN_TOKEN   管理员令牌

@@ -262,6 +262,33 @@ if (sect('stars')) {
   ok(!(await j('GET', '/api/v1/fs/stars')).body.items.some((x) => x.id === a.id), '取消收藏');
 }
 
+if (sect('random')) {
+  // 需要 wrangler dev 带 --var RANDOM_DIR:/e2e-random (DEVARGS='--var RANDOM_DIR:/e2e-random' bash .wrangler/devup.sh)
+  const R = '/e2e-random';
+  const probe = await fetch(`${BASE}/random?type=url`);
+  if (probe.status === 404 && /disabled/.test(await probe.text())) {
+    console.log('- random: 没设 RANDOM_DIR, 只验证关闭时 404');
+    ok(true, '没设 RANDOM_DIR 时 /random 404');
+  } else {
+    await put(`${R}/landscape`, 'wide.png', 'L', 'image/png', '&overwrite=1');
+    await put(`${R}/portrait`, 'tall.jpg', 'P', 'image/jpeg', '&overwrite=1');
+    await put(R, 'note.txt', 'not image', 'text/plain', '&overwrite=1');
+    const get = (q, ua = 'Mozilla/5.0 (X11; Linux x86_64)') => fetch(`${BASE}/random?${q}`, { headers: { 'User-Agent': ua }, redirect: 'manual' });
+    const pc = await (await get('type=url')).json();
+    ok(pc.name === 'wide.png' && pc.orientation === 'landscape', `auto + 桌面 UA 取横屏 (${pc.name})`);
+    const ph = await (await get('type=url', 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Mobile')).json();
+    ok(ph.name === 'tall.jpg' && ph.orientation === 'portrait', `auto + 手机 UA 取竖屏 (${ph.name})`);
+    ok((await (await get('type=url&dir=portrait&orientation=landscape')).json()).name === 'tall.jpg', '子目录里没有对应方向时退回全部图片');
+    const r = await get('');
+    ok(r.status === 302 && /\/f\//.test(r.headers.get('Location')) && r.headers.get('Cache-Control') === 'no-store', 'type=img 302 跳签名直链, no-store');
+    const img = await fetch(r.headers.get('Location'));
+    ok(img.status === 200 && ['L', 'P'].includes(await img.text()), '跳过去的直链能打开');
+    ok((await get('dir=nope')).status === 404 && (await get('dir=../x')).status === 400 && (await get('orientation=x')).status === 400, '不存在的目录 404, .. 和坏参数 400');
+    let txt = 0; for (let i = 0; i < 10; i++) if (/note/.test((await (await get('type=url')).json()).name)) txt++;
+    ok(txt === 0, '只取图片, 不取其他文件');
+  }
+}
+
 if (sect('fetch')) {
   const D = `${P}/fetch`;
   // 小文件: 远程地址用本服务自己的直链, 不依赖外网

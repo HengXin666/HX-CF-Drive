@@ -22,6 +22,8 @@ export interface Env {
   D1_METER?: string;
   /** WebDAV 报告的总容量 (GB), 不设为 1 PiB (TG 不限容量) */
   DAV_QUOTA_GB?: string;
+  /** 随机图 API (#22) 的图片目录, 如 /random。不设则 /random 返回 404 */
+  RANDOM_DIR?: string;
 }
 
 /** 当前请求的身份 */
