@@ -110,6 +110,19 @@ export async function listChildrenPage(env: Env, parentId: string, limit: number
 const COLS = 'id, parent_id, name, kind, size, mime, blob_id, created_at, updated_at, deleted_at';
 const nCols = COLS.split(', ').map((x) => 'n.' + x).join(', ');
 
+/** 整棵子树 (含自身, 未删除的), 一条递归 CTE 读完, 行读 ≈ 子树大小。最多返回 max 行 */
+export async function subtree(env: Env, id: string, max: number): Promise<NodeRow[]> {
+  const r = await env.DB.prepare(
+    `WITH RECURSIVE sub(${COLS}) AS (
+       SELECT ${COLS} FROM nodes WHERE id = ?1 AND deleted_at IS NULL
+       UNION ALL
+       SELECT ${nCols} FROM nodes n JOIN sub ON n.parent_id = sub.id WHERE sub.kind = 'dir' AND n.deleted_at IS NULL
+       LIMIT ?2
+     ) SELECT * FROM sub`,
+  ).bind(id, max).all<NodeRow>();
+  return r.results;
+}
+
 /** 已知路径 (从 root 解析出来的节点), 省掉一次 pathOf */
 const knownPath = new WeakMap<NodeRow, string>();
 

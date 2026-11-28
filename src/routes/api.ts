@@ -7,7 +7,7 @@ import { forgetToken, requireScope } from '../lib/auth';
 import { signLink } from '../lib/sign';
 import {
   assertAccess, getNode, getNodeAccessCached, getNodeWithAncestors, listChildren, listChildrenPage, mkdirp, moveNode, type NodeRow, pathFor, pathsOf, publicNode, resolvePath, trashNode,
-  pathOf,
+  pathOf, subtree,
 } from '../lib/tree';
 import { HttpError, newId, now, sha256Hex } from '../lib/util';
 import { runMaintenance } from '../services/maintenance';
@@ -97,23 +97,54 @@ api.post('/fs/copy', requireScope('write'), async (c) => {
   return c.json({ node: publicNode(node) });
 });
 
-/** 复制只复制元数据并增加 blob 引用, 不复制实际数据。最多 2000 个节点 */
+/** 复制只复制元数据并增加 blob 引用, 不复制实际数据。最多 COPY_MAX 个节点 */
+export const COPY_MAX = 2000;
+/** 每条 INSERT 带多少行 (整批作为一个 JSON 参数, 不受 D1 每条 100 个绑定参数的限制) */
+const COPY_ROWS_PER_STMT = 200;
+
+/**
+ * 一次读出整棵子树, 在内存里生成新 id 与父子映射, 再用一个 batch (事务) 写完 (#23):
+ * - 节点每 200 行一条 INSERT ... SELECT FROM json_each(?)
+ * - 引用计数按 blob 聚合成一条 UPDATE
+ * 复制 2000 个节点约 12 次查询 (原来每个节点 1 次 batch + 每个目录 1 次 list, 串行, 会超出单次调用的查询数上限)。
+ * batch 是事务, 中途失败整体回滚, 不会留下半棵树。
+ */
 export async function copyTree(env: Env, src: NodeRow, parentId: string, name: string): Promise<NodeRow> {
-  let budget = 2000;
+  const rows = src.kind === 'dir' ? await subtree(env, src.id, COPY_MAX + 1) : [src];
+  if (rows.length > COPY_MAX) throw new HttpError(413, `copy too large (max ${COPY_MAX} nodes)`);
   const t = now();
-  const walk = async (n: NodeRow, pid: string, nm: string): Promise<NodeRow> => {
-    if (--budget < 0) throw new HttpError(413, 'copy too large (max 2000 nodes)');
-    const id = newId();
-    const stmts = [
-      env.DB.prepare('INSERT INTO nodes (id, parent_id, name, kind, size, mime, blob_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-        .bind(id, pid, nm, n.kind, n.size, n.mime, n.blob_id, t, t),
-    ];
-    if (n.blob_id) stmts.push(env.DB.prepare('UPDATE blobs SET ref_count = ref_count + 1 WHERE id = ?').bind(n.blob_id));
+  const ids = new Map<string, string>();
+  for (const n of rows) ids.set(n.id, newId());
+  const refs = new Map<string, number>();
+  const values = rows.map((n) => {
+    if (n.blob_id) refs.set(n.blob_id, (refs.get(n.blob_id) ?? 0) + 1);
+    const top = n.id === src.id;
+    return [ids.get(n.id), top ? parentId : ids.get(n.parent_id!), top ? name : n.name, n.kind, n.size, n.mime, n.blob_id];
+  });
+  const stmts: D1PreparedStatement[] = [];
+  for (let i = 0; i < values.length; i += COPY_ROWS_PER_STMT) {
+    stmts.push(env.DB.prepare(
+      `INSERT INTO nodes (id, parent_id, name, kind, size, mime, blob_id, created_at, updated_at)
+       SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]'), json_extract(value, '$[2]'), json_extract(value, '$[3]'),
+              json_extract(value, '$[4]'), json_extract(value, '$[5]'), json_extract(value, '$[6]'), ?2, ?2
+       FROM json_each(?1)`,
+    ).bind(JSON.stringify(values.slice(i, i + COPY_ROWS_PER_STMT)), t));
+  }
+  if (refs.size) {
+    stmts.push(env.DB.prepare(
+      `UPDATE blobs SET ref_count = ref_count + j.n
+       FROM (SELECT json_extract(value, '$[0]') AS id, json_extract(value, '$[1]') AS n FROM json_each(?1)) AS j
+       WHERE blobs.id = j.id`,
+    ).bind(JSON.stringify([...refs])));
+  }
+  try {
     await env.DB.batch(stmts);
-    if (n.kind === 'dir') for (const ch of await listChildren(env, n.id)) await walk(ch, id, ch.name);
-    return { ...n, id, parent_id: pid, name: nm, created_at: t, updated_at: t };
-  };
-  return walk(src, parentId, name);
+  } catch (e) {
+    // 只有顶层可能重名 (子项都挂在新 id 下)
+    if (/UNIQUE/i.test(String(e))) throw new HttpError(409, 'target exists');
+    throw e;
+  }
+  return { ...src, id: ids.get(src.id)!, parent_id: parentId, name, created_at: t, updated_at: t, deleted_at: null };
 }
 
 api.post('/fs/delete', requireScope('write'), async (c) => {
