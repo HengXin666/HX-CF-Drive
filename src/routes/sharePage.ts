@@ -68,54 +68,61 @@ function layout(title: string, body: string): string {
     + `<body><main>${body}<footer>HX-CF-Drive 分享</footer></main></body></html>`;
 }
 
-/** 分享页里的链接参数: 子路径, 密码, 以及 download / raw */
-export interface Ctx { id: string; pw: string }
-
-function href(ctx: Ctx, extra: Record<string, string>): string {
-  const q = new URLSearchParams(extra);
-  if (ctx.pw) q.set('p', ctx.pw);
-  const s = q.toString();
-  return `/s/${encodeURIComponent(ctx.id)}${s ? `?${s}` : ''}`;
+/** 分享页里的链接: path 里每段都已 encodeURIComponent (服务端 splitPath 逐段解码), 不带密码 (密码换成了 Cookie) */
+function href(id: string, extra: Record<string, string>): string {
+  const q = new URLSearchParams(extra).toString();
+  return `/s/${encodeURIComponent(id)}${q ? `?${q}` : ''}`;
 }
 
-const joinPath = (dir: string, name: string) => `${dir.replace(/\/+$/, '')}/${name}`;
+const joinPath = (dir: string, name: string) => `${dir.replace(/\/+$/, '')}/${encodeURIComponent(name)}`;
 
-export function passwordPage(id: string, opts: { wrong?: boolean; locked?: number } = {}): string {
+function decodeSeg(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
+
+/** 密码页: 表单 POST 回 /s/:id, 密码不进地址栏; path 带上, 输对后回到原来的子目录 */
+export function passwordPage(id: string, path: string, opts: { wrong?: boolean; locked?: number } = {}): string {
   const msg = opts.locked
     ? `<p class="err">密码错误次数太多, 请 ${Math.ceil(opts.locked / 60)} 分钟后再试。</p>`
     : opts.wrong ? '<p class="err">密码不对, 请重试。</p>' : '';
+  const off = opts.locked ? ' disabled' : '';
   return layout('需要密码', `<div class="eyebrow">${icon('lock')} 分享</div><h1>这个分享需要密码</h1><div class="meta">输入分享者给你的密码后查看。</div>`
-    + `<form class="card pad" method="get" action="/s/${encodeURIComponent(id)}">${msg}`
-    + `<input type="password" name="p" placeholder="密码" autocomplete="off" autofocus required${opts.locked ? ' disabled' : ''}>`
-    + `<button class="btn primary" type="submit"${opts.locked ? ' disabled' : ''}>查看</button></form>`);
+    + `<form class="card pad" method="post" action="/s/${encodeURIComponent(id)}">${msg}`
+    + `<input type="hidden" name="path" value="${esc(path)}">`
+    + `<input type="password" name="p" placeholder="密码" autocomplete="off" autofocus required${off}>`
+    + `<button class="btn primary" type="submit"${off}>查看</button></form>`);
 }
 
 export function errorPage(title: string, detail: string): string {
   return layout(title, `<div class="eyebrow">分享</div><h1>${esc(title)}</h1><div class="meta">${esc(detail)}</div>`);
 }
 
-export function filePage(ctx: Ctx, node: NodeRow, sub?: string): string {
+export function filePage(id: string, node: NodeRow, sub?: string): string {
   const base: Record<string, string> = sub ? { path: sub } : {};
   return layout(node.name, `<div class="eyebrow">${icon('file')} 文件分享</div><h1>${esc(node.name)}</h1>`
     + `<div class="meta"><span>${fmtSize(node.size)}</span><span>${esc(node.mime ?? '')}</span><span>${fmtTime(node.updated_at)}</span></div>`
-    + `<div class="actions"><a class="btn primary" href="${esc(href(ctx, { ...base, download: '1' }))}">${icon('download')} 下载</a>`
-    + `<a class="btn" href="${esc(href(ctx, { ...base, raw: '1' }))}" target="_blank" rel="noopener">${icon('open')} 在浏览器打开</a></div>`);
+    + `<div class="actions"><a class="btn primary" href="${esc(href(id, { ...base, download: '1' }))}">${icon('download')} 下载</a>`
+    + `<a class="btn" href="${esc(href(id, { ...base, raw: '1' }))}" target="_blank" rel="noopener">${icon('open')} 在浏览器打开</a></div>`);
 }
 
 /** 文件夹: sub 是相对分享根的路径 ('' 为根本身) */
-export function dirPage(ctx: Ctx, root: NodeRow, sub: string, children: NodeRow[]): string {
+export function dirPage(id: string, root: NodeRow, sub: string, children: NodeRow[]): string {
   const segs = sub.split('/').filter(Boolean);
-  const crumbs = [`<a href="${esc(href(ctx, {}))}">${esc(root.name)}</a>`];
-  segs.forEach((s, i) => crumbs.push(`<span>/</span><a href="${esc(href(ctx, { path: '/' + segs.slice(0, i + 1).join('/') }))}">${esc(s)}</a>`));
+  const crumbs = [`<a href="${esc(href(id, {}))}">${esc(root.name)}</a>`];
+  segs.forEach((s, i) => crumbs.push(`<span>/</span><a href="${esc(href(id, { path: '/' + segs.slice(0, i + 1).join('/') }))}">${esc(decodeSeg(s))}</a>`));
   const rows = children.map((n) => {
     const p = joinPath(sub || '/', n.name);
     if (n.kind === 'dir') {
-      return `<div class="row dir">${icon('folder')}<a class="name" href="${esc(href(ctx, { path: p }))}">${esc(n.name)}</a><span class="size">文件夹</span></div>`;
+      return `<div class="row dir">${icon('folder')}<a class="name" href="${esc(href(id, { path: p }))}">${esc(n.name)}</a><span class="size">文件夹</span></div>`;
     }
-    return `<div class="row">${icon('file')}<a class="name" href="${esc(href(ctx, { path: p }))}">${esc(n.name)}</a><span class="size">${fmtSize(n.size)}</span>`
-      + `<a class="btn icon" title="下载" aria-label="下载 ${esc(n.name)}" href="${esc(href(ctx, { path: p, download: '1' }))}">${icon('download')}</a></div>`;
+    return `<div class="row">${icon('file')}<a class="name" href="${esc(href(id, { path: p }))}">${esc(n.name)}</a><span class="size">${fmtSize(n.size)}</span>`
+      + `<a class="btn icon" title="下载" aria-label="下载 ${esc(n.name)}" href="${esc(href(id, { path: p, download: '1' }))}">${icon('download')}</a></div>`;
   }).join('');
-  const title = segs.length ? segs[segs.length - 1] : root.name;
+  const title = segs.length ? decodeSeg(segs[segs.length - 1]) : root.name;
   const files = children.filter((n) => n.kind === 'file').length;
   return layout(title, `<div class="eyebrow">${icon('folder')} 文件夹分享</div><h1>${esc(title)}</h1>`
     + `<div class="meta"><span>${children.length - files} 个文件夹</span><span>${files} 个文件</span></div>`

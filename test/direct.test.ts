@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { Hono } from 'hono';
 import { sealJson } from '../src/lib/sign';
-import { HttpError } from '../src/lib/util';
+import { HttpError, sha256Hex } from '../src/lib/util';
+import { pub } from '../src/routes/public';
 import { api } from '../src/routes/api';
 import { dirPage, filePage, fmtSize, passwordPage, wantsHtml } from '../src/routes/sharePage';
 import { commitUpload, foldReceipts, openTicketBare, PART_SIZE, type Ticket } from '../src/services/upload';
@@ -96,17 +97,43 @@ describe('分享页 (v0.4)', () => {
   });
   const node = (name: string, kind: 'dir' | 'file', size = 0): NodeRow =>
     ({ id: name, parent_id: 'p', name, kind, size, mime: 'text/plain', blob_id: null, created_at: 0, updated_at: 0, deleted_at: null }) as NodeRow;
-  it('文件夹列表: 子目录与下载链接带上路径和密码, 名字转义', () => {
-    const html = dirPage({ id: 'abc', pw: 'p w' }, node('根', 'dir'), '/a', [node('子<b>', 'dir'), node('x&y.txt', 'file', 2048)]);
+  it('文件夹列表: 子目录与下载链接带上路径 (名字逐段编码), 不带密码, 名字转义', () => {
+    const html = dirPage('abc', node('根', 'dir'), '/a', [node('子<b>', 'dir'), node('x&y%20.txt', 'file', 2048)]);
     expect(html).toContain('子&lt;b&gt;');
     expect(html).not.toContain('子<b>');
-    expect(html).toContain('/s/abc?path=%2Fa%2Fx%26y.txt&amp;download=1&amp;p=p+w');
+    expect(html).toContain('/s/abc?path=%2Fa%2Fx%2526y%252520.txt&amp;download=1');
+    expect(html).not.toMatch(/[?;]p=/);
     expect(html).toContain('2.0 KB');
   });
-  it('文件页有下载按钮; 密码页有表单与错误提示', () => {
-    expect(filePage({ id: 'abc', pw: '' }, node('a.mp4', 'file', 5)) ).toContain('/s/abc?download=1');
-    expect(passwordPage('abc', { wrong: true })).toContain('密码不对');
-    expect(passwordPage('abc', { locked: 600 })).toContain('10 分钟');
+  it('文件页有下载按钮; 密码页是 POST 表单, 带上子路径与错误提示', () => {
+    expect(filePage('abc', node('a.mp4', 'file', 5))).toContain('/s/abc?download=1');
+    const pw = passwordPage('abc', '/a/b', { wrong: true });
+    expect(pw).toContain('method="post"');
+    expect(pw).toContain('name="path" value="/a/b"');
+    expect(pw).toContain('密码不对');
+    expect(passwordPage('abc', '', { locked: 600 })).toContain('10 分钟');
     expect(fmtSize(10 * 1024 ** 3)).toBe('10.0 GB');
+  });
+  it('密码表单: 错了 401 页面, 对了 303 发 Cookie, 带 Cookie 不用再给密码', async () => {
+    const hash = await sha256Hex('abc:pw');
+    const row = { id: 'abc', node_id: 'n', password_hash: hash, expires_at: null, fails: 0, locked_until: null };
+    const DB = { prepare: (sql: string) => ({ bind: () => ({ first: async () => (sql.includes('FROM shares') ? row : null), run: async () => ({}), all: async () => ({ results: [] }) }) }) };
+    const app = new Hono();
+    app.onError((e, c) => c.json({ error: e.message }, (e instanceof HttpError ? e.status : 500) as 400));
+    app.route('/', pub);
+    const env = { SIGNING_KEY: KEY, DB };
+    const post = (p: string) => app.request('/s/abc', { method: 'POST', body: new URLSearchParams({ p, path: '/x' }) }, env);
+    const bad = await post('no');
+    expect(bad.status).toBe(401);
+    expect(await bad.text()).toContain('密码不对');
+    const ok = await post('pw');
+    expect(ok.status).toBe(303);
+    expect(ok.headers.get('location')).toBe('/s/abc?path=%2Fx');
+    const cookie = ok.headers.get('set-cookie')!.split(';')[0];
+    expect(cookie).toMatch(/^hxs_abc=/);
+    expect((await app.request('/s/abc', {}, env)).status).toBe(401);
+    // 带 Cookie 过了密码这关, 走到取节点 (假库里没有 → 404)
+    expect((await app.request('/s/abc', { headers: { cookie } }, env)).status).toBe(404);
+    expect((await app.request('/s/abc', { headers: { cookie: 'hxs_abc=forged' } }, env)).status).toBe(401);
   });
 });

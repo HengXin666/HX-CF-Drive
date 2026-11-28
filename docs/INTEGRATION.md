@@ -44,7 +44,7 @@ curl -X POST -H "Authorization: Bearer $ADMIN" -H "Content-Type: application/jso
 | POST | `/api/v1/uploads/commit` `{ticket, receipts, folds}` | 分片上传: 提交回执和聚合回执 |
 | POST/GET/DELETE | `/api/v1/shares` | 分享链接 |
 | GET | `/f/:id/:name?e=&s=` | 签名直链 (公开) |
-| GET | `/s/:id?path=子路径` | 分享 (公开); 有密码时用 `X-Share-Password` 头 (也接受 `?p=`, 但会进日志和历史), 连错 10 次锁 15 分钟。浏览器打开 (`Accept: text/html`) 时返回页面 (v0.4): 密码输入, 文件夹列表, 下载按钮; `?download=1` 下载, `?raw=1` 照旧返回 JSON / 文件本身 |
+| GET | `/s/:id?path=子路径` | 分享 (公开); 有密码时用 `X-Share-Password` 头 (也接受 `?p=`, 但会进日志和历史), 连错 10 次锁 15 分钟。浏览器打开 (`Accept: text/html`) 时返回页面 (v0.4): 密码输入, 文件夹列表, 下载按钮; `?download=1` 下载, `?raw=1` 照旧返回 JSON / 文件本身。页面里的密码表单 `POST /s/:id` (表单字段 `p`, `path`), 输对后发一个只对该分享有效 1 天的 HttpOnly Cookie, 之后的链接不带密码 |
 | * | `/api/v1/admin/*` | 管理: stats, bots, channels, tokens, maintenance |
 
 错误统一返回 `{"error": "..."}`; 服务端内部错误只返回 `{"error":"internal error","requestId":"..."}`。429 和 503 带 `Retry-After` 头, 客户端按它等待后重试。
@@ -89,7 +89,8 @@ curl -X PUT --data-binary @part0 "$CHUNK_URL?i=0&ticket=$TICKET"
 ```
 
 - 票据是 HMAC 签过的凭证, 只能往这一个上传里写字节, 不能读, 不能提交, 不能写别的文件; 24 小时到期。
-- 签发票据的令牌被吊销或过期后, 它签的票据立即作废 (每个 isolate 缓存 60 秒)。
+- 签发票据的令牌被吊销或过期后, 它签的票据最多 60 秒内作废 (令牌状态每个 isolate 缓存 60 秒)。
+- D1: 带令牌传分片仍是零读写; 只凭票据时要查一次令牌是否还在, 每个 isolate 每个令牌每分钟最多读 1 行 (管理员签的票据不查)。
 - 带了 `Authorization` 时按令牌校验 (票据必须是这个令牌签的), 和以前一样; 带了坏令牌回 401, 不会退回只凭票据。
 - 票据在 URL 里, 会进访问日志; 它只能补这一个上传的分片, 泄露的后果是别人能往这个上传里塞字节 (commit 时内容不对由调用方自己校验哈希)。
 - CORS: `/api/*` 允许任意来源的 PUT, 浏览器直传不需要额外配置。
