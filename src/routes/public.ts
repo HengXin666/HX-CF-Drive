@@ -4,7 +4,7 @@ import { getCookie } from 'hono/cookie';
 import type { AppEnv, Env } from '../env';
 import { verifyLink } from '../lib/sign';
 import { tokenAlive } from '../lib/auth';
-import { getNode, getNodeCached, listChildren, type NodeRow, publicNode, resolvePath } from '../lib/tree';
+import { getNodeCached, listChildren, type NodeRow, publicNode, resolvePath } from '../lib/tree';
 import { HttpError, sha256Hex } from '../lib/util';
 import { serveNode } from '../services/serve';
 import { dirPage, errorPage, filePage, passwordPage, wantsHtml } from './sharePage';
@@ -129,7 +129,8 @@ async function openShare(c: Context<AppEnv>, html: boolean): Promise<Response> {
     const passed = !pw && getCookie(c, cookieName(share.id)) === (await cookieValue(c.env, share));
     if (!passed) await checkPassword(c.env, share, pw);
   }
-  const root = await getNode(c.env, share.node_id);
+  // 分享根节点走 isolate 内 60 秒节点缓存 (#23, 与 /f/ 直链相同): 热门分享不再每次跑递归 CTE。share 行本身不缓存, 撤销分享立即生效
+  const root = await getNodeCached(c.env, share.node_id);
   if (!root) throw new HttpError(404, 'shared item removed');
   const sub = c.req.query('path');
   const node = sub ? await resolvePath(c.env, root.id, sub): root;

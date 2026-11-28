@@ -42,11 +42,11 @@ export async function purgeNodes(env: Env, maxNodes: number, passes = 8): Promis
       .bind(cutoff, Math.min(200, maxNodes - done))
       .all<{ id: string; kind: string; blob_id: string | null; deleted_at: number }>();
     if (!expired.results.length) break;
-    const stmts = [];
+    // 分享按 node_id 一条语句删完 (#23): shares.node_id 没有索引, 原来每个节点一条 DELETE 就要全表扫一次 shares。放在删节点之前, 与原顺序一致
+    const stmts = [env.DB.prepare('DELETE FROM shares WHERE node_id IN (SELECT value FROM json_each(?))').bind(JSON.stringify(expired.results.map((n) => n.id)))];
     for (const n of expired.results) {
       if (n.kind === 'dir') stmts.push(env.DB.prepare('UPDATE nodes SET deleted_at = ? WHERE parent_id = ? AND deleted_at IS NULL').bind(n.deleted_at, n.id));
       if (n.blob_id) stmts.push(env.DB.prepare('UPDATE blobs SET ref_count = ref_count - 1 WHERE id = ?').bind(n.blob_id));
-      stmts.push(env.DB.prepare('DELETE FROM shares WHERE node_id = ?').bind(n.id));
       stmts.push(env.DB.prepare('DELETE FROM nodes WHERE id = ?').bind(n.id));
     }
     await env.DB.batch(stmts);
